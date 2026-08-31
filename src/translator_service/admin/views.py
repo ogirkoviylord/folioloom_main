@@ -147,8 +147,13 @@ _UNSAFE_SUPPORT_VALUE_MARKERS = (
 _FAILED_SUPPORT_TRANSLATION_STATUSES = frozenset({"failed", "interrupted", "error"})
 
 
-def login_page(*, error: str | None = None) -> str:
+def login_page(*, error: str | None = None, next_url: str | None = None) -> str:
     error_html = f'<p class="error">{escape(error)}</p>' if error else ""
+    next_input = (
+        f'<input type="hidden" name="next" value="{escape(next_url, quote=True)}">'
+        if next_url
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -163,6 +168,7 @@ def login_page(*, error: str | None = None) -> str:
     <h1>Admin Login</h1>
     {error_html}
     <form method="post" action="/admin/login">
+      {next_input}
       <label>
         Password
         <input name="password" type="password" autocomplete="current-password" required>

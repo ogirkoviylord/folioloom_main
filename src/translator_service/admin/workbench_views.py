@@ -39,11 +39,24 @@ from translator_service.document_intake import OwnerDocumentCatalogEntry
 # ---------------------------------------------------------------------------
 
 
-#: Honest placeholder stages (packet §3.2 nav rail + §4.4 future screen).
-WORKBENCH_PLACEHOLDER_STAGES: tuple[tuple[str, str], ...] = (
+#: The approved Workbench information architecture from GitHub #817. AI
+#: Suggestions is a sub-screen of Glossary, not a top-level Workbench stage.
+#: The durable Library is real; the remaining stages stay honest placeholders
+#: until their separately scoped slices exist.
+WORKBENCH_NAV_STAGES: tuple[tuple[str, str], ...] = (
     ("project-library", "Project Library"),
     ("document-setup", "Document Setup"),
-    ("ai-suggestions", "Suggestions"),
+    ("glossary", "Glossary"),
+    ("translate", "Translate"),
+    ("review", "Review"),
+    ("export", "Export"),
+)
+
+
+#: Honest placeholder stages (packet §3.2 nav rail + §4.4 future screen).
+#: Document Setup keeps its tag outside its implemented active orientation view.
+WORKBENCH_PLACEHOLDER_STAGES: tuple[tuple[str, str], ...] = (
+    ("document-setup", "Document Setup"),
     ("translate", "Translate"),
     ("review", "Review"),
     ("export", "Export"),
@@ -245,6 +258,10 @@ def _workbench_css() -> str:
   font-weight: 600;
 }
 .wb-nav__link:hover { background: var(--wb-line); }
+.wb-nav__link--unavailable {
+  color: var(--wb-ink-soft);
+  cursor: not-allowed;
+}
 .wb-nav__placeholder-tag {
   font-size: 0.6875rem;
   color: var(--wb-ink-soft);
@@ -272,6 +289,11 @@ def _workbench_css() -> str:
 }
 .wb-card h3 { margin: 0 0 8px 0; font-size: 1rem; }
 .wb-card p { margin: 0; color: var(--wb-ink-soft); }
+.wb-document-setup {
+  display: grid;
+  gap: 12px;
+}
+.wb-document-setup .wb-button { display: inline-block; justify-self: start; }
 .wb-strip {
   border-radius: var(--wb-radius-md);
   padding: 12px 16px;
@@ -580,27 +602,50 @@ def _workbench_header(document_id: str, ephemeral_session_id: str) -> str:
 """
 
 
-def _workbench_nav(active: str, document_id: str | None) -> str:
+def _workbench_nav(
+    active: str,
+    document_id: str | None,
+    *,
+    glossary_href: str | None = None,
+    document_setup_href: str | None = None,
+) -> str:
     document_qs = f"?document={_safe_attr(document_id)}" if document_id else ""
-    glossary_href = f"/admin/workbench/glossary{document_qs}"
-    aria_current_attr = ' aria-current="page"' if active == "glossary" else ""
-    glossary_link = (
-        f'<a class="wb-nav__link" href="{glossary_href}"{aria_current_attr}>'
-        "<span>Glossary</span></a>"
-    )
-    placeholder_links: list[str] = []
-    for stage_key, title in WORKBENCH_PLACEHOLDER_STAGES:
-        href = f"/admin/workbench/future?stage={_safe_attr(stage_key)}"
-        placeholder_links.append(
-            f'<a class="wb-nav__link" href="{href}">'
-            f"<span>{_safe_attr(title)}</span>"
-            '<span class="wb-nav__placeholder-tag" aria-label="placeholder">'
-            "not in slice</span></a>"
+    resolved_glossary_href = glossary_href or f"/admin/workbench/glossary{document_qs}"
+    placeholder_keys = {key for key, _title in WORKBENCH_PLACEHOLDER_STAGES}
+    links: list[str] = []
+    for stage_key, title in WORKBENCH_NAV_STAGES:
+        aria_current_attr = ' aria-current="page"' if active == stage_key else ""
+        if stage_key == "project-library":
+            href = "/admin/workbench/"
+        elif stage_key == "document-setup":
+            href = _safe_attr(document_setup_href) if document_setup_href else ""
+        elif stage_key == "glossary":
+            href = _safe_attr(resolved_glossary_href)
+        else:
+            href = f"/admin/workbench/future?stage={_safe_attr(stage_key)}"
+        is_active_document_setup = (
+            stage_key == "document-setup" and active == "document-setup"
         )
+        placeholder_tag = (
+            '<span class="wb-nav__placeholder-tag" aria-label="placeholder">'
+            "not in slice</span>"
+            if stage_key in placeholder_keys and not is_active_document_setup
+            else ""
+        )
+        if stage_key == "document-setup" and not document_setup_href:
+            links.append(
+                '<span class="wb-nav__link wb-nav__link--unavailable" '
+                'aria-disabled="true">'
+                f"<span>{_safe_attr(title)}</span>{placeholder_tag}</span>"
+            )
+        else:
+            links.append(
+                f'<a class="wb-nav__link" href="{href}"{aria_current_attr}>'
+                f"<span>{_safe_attr(title)}</span>{placeholder_tag}</a>"
+            )
     return f"""
 <nav class="wb-nav" aria-label="Workbench navigation">
-  {glossary_link}
-  {"".join(placeholder_links)}
+  {"".join(links)}
 </nav>
 """
 
@@ -1162,6 +1207,7 @@ def _workbench_page(
     active: str = "glossary",
     csrf_token: str | None = None,
     not_wired_after_post: bool = False,
+    show_navigation: bool = True,
 ) -> str:
     safe_title = _safe_attr(title)
     safe_doc_id = _safe_attr(state.document.document_id or "")
@@ -1193,7 +1239,11 @@ def _workbench_page(
         document_id=state.document.document_id,
         ephemeral_session_id=state.session_id,
     )
-    nav = _workbench_nav(active, state.document.document_id or None)
+    nav = (
+        _workbench_nav(active, state.document.document_id or None)
+        if show_navigation
+        else ""
+    )
     helper_rail = _workbench_helper_rail(state)
     csrf_token = csrf_token or ""
     return f"""<!doctype html>
@@ -1262,8 +1312,21 @@ def render_workbench_select(*, csrf_token: str, injected: bool = False) -> str:
     )
 
 
-def _durable_workbench_page(*, title: str, body: str) -> str:
-    """Render the durable document flow without the legacy ephemeral session UI."""
+def _durable_workbench_page(
+    *,
+    title: str,
+    body: str,
+    active: str,
+    glossary_href: str | None = None,
+    document_setup_href: str | None = None,
+) -> str:
+    """Render a durable route inside the approved Workbench navigation."""
+    nav = _workbench_nav(
+        active,
+        document_id=None,
+        glossary_href=glossary_href,
+        document_setup_href=document_setup_href,
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1275,10 +1338,10 @@ def _durable_workbench_page(*, title: str, body: str) -> str:
 <body class="workbench">
   <header class="wb-header" role="banner">
     <div class="wb-header__brand"><span class="wb-header__eyebrow">FolioLoom</span><span class="wb-header__title">Workbench</span></div>
-    <div class="wb-header__chips"><a class="wb-chip" href="/admin/workbench/">Library</a></div>
+    <div class="wb-header__chips"><a class="wb-chip" href="/admin/overview">Back to Admin</a></div>
   </header>
   <div class="wb-shell">
-    <nav class="wb-nav" aria-label="Workbench navigation"><a class="wb-nav__link" href="/admin/workbench/"><span>Library</span></a></nav>
+    {nav}
     <main class="wb-main" aria-label="Workbench main">{body}</main>
   </div>
 </body>
@@ -1288,26 +1351,44 @@ def _durable_workbench_page(*, title: str, body: str) -> str:
 def render_workbench_library(
     *, csrf_token: str, catalog: Iterable[OwnerDocumentCatalogEntry]
 ) -> str:
-    """Render the owner-owned durable DOCX catalog inside Workbench chrome."""
-    rows = "".join(
-        "<li><strong>"
-        f"{_safe_attr(entry.file_name)}</strong> ({entry.source_size_bytes} bytes)"
+    """Render imported DOCX documents as the first Workbench screen."""
+    document_cards = "".join(
+        "<li class=\"wb-card\"><strong>"
+        f"{_safe_attr(entry.file_name)}</strong>"
+        f"<p>Imported DOCX · {entry.source_size_bytes} bytes</p>"
         "<form method=\"post\" action=\"/admin/workbench/select\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
         f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(entry.document_custody_id)}\">"
-        "<button type=\"submit\">Open Document Studio</button></form></li>"
+        "<button type=\"submit\">Continue to Document Setup</button></form></li>"
         for entry in catalog
-    ) or "<li>No durable DOCX documents yet.</li>"
+    )
+    document_list = (
+        f"<h2>Your documents</h2><ul>{document_cards}</ul>"
+        if document_cards
+        else (
+            "<section class=\"wb-empty\" aria-label=\"Empty Project Library\">"
+            "<h2>Start with your book or document</h2>"
+            "<p>No documents have been imported into this Workbench yet. "
+            "Import a DOCX to begin preparing it for translation.</p>"
+            "</section>"
+        )
+    )
     body = (
-        "<section class=\"wb-card\"><h1>Library</h1>"
-        "<p>Import a DOCX or open a document in Document Studio.</p>"
+        "<section class=\"wb-card\"><h1>Project Library</h1>"
+        "<p>Keep the documents you are preparing for translation together here.</p>"
+        "<p>DOCX import is available in this local Workbench. Imported documents "
+        "are ready for you to continue working on.</p>"
         "<form method=\"post\" action=\"/admin/workbench/upload\" enctype=\"multipart/form-data\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
         "<label>DOCX file <input type=\"file\" name=\"file\" accept=\".docx\" required></label>"
         "<button type=\"submit\">Import DOCX</button></form>"
-        f"<h2>Your documents</h2><ul>{rows}</ul></section>"
+        f"{document_list}</section>"
     )
-    return _durable_workbench_page(title="Library", body=body)
+    return _durable_workbench_page(
+        title="Project Library",
+        body=body,
+        active="project-library",
+    )
 
 
 def render_workbench_document_studio(
@@ -1320,7 +1401,7 @@ def render_workbench_document_studio(
     revision_sequence: int | None,
     lock_status: str,
 ) -> str:
-    """Render the durable glossary editor in Workbench chrome."""
+    """Render the durable glossary editor with author-facing copy."""
     locked = lock_status == "active"
     disabled = " disabled" if locked else ""
     parent = expected_parent_revision_id or "no-parent"
@@ -1329,7 +1410,7 @@ def render_workbench_document_studio(
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
         f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(document_custody_id)}\">"
         f"<input type=\"hidden\" name=\"expected_parent_revision_id\" value=\"{_safe_attr(parent)}\">"
-        f"<fieldset{disabled}><legend>Glossary revision</legend>"
+        f"<fieldset{disabled}><legend>Glossary</legend>"
         "<label>Source language <input name=\"source_language\" required></label>"
         "<label>Target language <input name=\"target_language\" required></label>"
         "<div id=\"glossary-rows\"><fieldset><legend>Glossary row</legend>"
@@ -1337,7 +1418,7 @@ def render_workbench_document_studio(
         "<label>Target term <input name=\"target_term\" required></label>"
         "<label>Type <select name=\"entry_type\"><option value=\"term\">Term</option><option value=\"name\">Name</option></select></label>"
         "</fieldset></div><button type=\"button\" id=\"add-glossary-row\">Add glossary row</button>"
-        "<button type=\"submit\">Save revision</button></fieldset></form>"
+        "<button type=\"submit\">Save glossary</button></fieldset></form>"
         "<script>document.getElementById('add-glossary-row').addEventListener('click', function () {"
         "const row = document.createElement('fieldset');"
         "row.innerHTML = '<legend>Glossary row</legend><label>Source term <input name=\"source_term\" required></label><label>Target term <input name=\"target_term\" required></label><label>Type <select name=\"entry_type\"><option value=\"term\">Term</option><option value=\"name\">Name</option></select></label>';"
@@ -1347,17 +1428,60 @@ def render_workbench_document_studio(
         "<form method=\"post\" action=\"/admin/workbench/studio/lock\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
         f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(document_custody_id)}\">"
-        "<button type=\"submit\">Lock current revision</button></form>"
+        "<button type=\"submit\">Make glossary read-only</button></form>"
+    )
+    glossary_href = (
+        "/admin/workbench/studio?document_custody_id="
+        + quote(document_custody_id, safe="")
+    )
+    document_setup_href = (
+        "/admin/workbench/future?stage=document-setup&document_custody_id="
+        + quote(document_custody_id, safe="")
     )
     body = (
-        "<section class=\"wb-card\"><p><a href=\"/admin/workbench/\">← Library</a></p>"
-        "<h1>Document Studio</h1>"
+        "<section class=\"wb-card\"><p><a href=\"/admin/workbench/\">← Project Library</a></p>"
+        "<h1>Glossary</h1>"
         f"<p><strong>{_safe_attr(file_name)}</strong> · DOCX · {source_size_bytes} bytes</p>"
-        f"<p>Current revision: {revision_sequence if revision_sequence is not None else 'not created'}; lock state: {_safe_attr(lock_status)}</p>"
-        + ("<p>This glossary is locked and read-only.</p>" if locked else "")
+        + ("<p>This glossary is read-only.</p>" if locked else "")
         + editor + lock_form + "</section>"
     )
-    return _durable_workbench_page(title="Document Studio", body=body)
+    return _durable_workbench_page(
+        title="Glossary",
+        body=body,
+        active="glossary",
+        glossary_href=glossary_href,
+        document_setup_href=document_setup_href,
+    )
+
+
+def render_workbench_document_setup(
+    *,
+    file_name: str,
+    source_size_bytes: int,
+    glossary_href: str,
+    document_setup_href: str,
+) -> str:
+    """Render the selected-document setup orientation without setup controls."""
+    body = (
+        "<section class=\"wb-card wb-document-setup\"><h1>Document Setup</h1>"
+        f"<p><strong>{_safe_attr(file_name)}</strong></p>"
+        "<p>Source format: DOCX</p>"
+        "<p>Review this document, then continue to its glossary.</p>"
+        f"<a class=\"wb-button wb-button--primary\" href=\"{_safe_attr(glossary_href)}\">"
+        "Continue to Glossary</a>"
+        "<p>Document Setup does not save setup choices or start translation.</p>"
+        "<p>Source language, target language, and AI-assisted glossary terms are not "
+        "part of Document Setup yet.</p>"
+        "<p><a class=\"wb-button wb-button--secondary\" href=\"/admin/workbench/\">"
+        "Back to Project Library</a></p></section>"
+    )
+    return _durable_workbench_page(
+        title="Document Setup",
+        body=body,
+        active="document-setup",
+        glossary_href=glossary_href,
+        document_setup_href=document_setup_href,
+    )
 
 
 def render_workbench_glossary(
@@ -1441,13 +1565,16 @@ def render_workbench_recovery(
 ) -> str:
     """Render the Recovery screen (packet §4.3).
 
-    Reasons: ``stale``, ``unavailable``, ``not-wired``, ``invalid``.
+    Reasons: ``stale``, ``unavailable``, ``not-wired``, ``invalid``, and the
+    Document Setup-only ``unresolved-context`` recovery.
     """
     copy_map = {
         "stale": WORKBENCH_COPY["recovery_stale"],
         "unavailable": WORKBENCH_COPY["recovery_unavailable"],
         "not-wired": WORKBENCH_COPY["recovery_not_wired"],
         "invalid": WORKBENCH_COPY["recovery_invalid"],
+        "unresolved-context": "This document setup is unavailable. Open Project "
+        "Library to select a document.",
     }
     action_map = {
         "stale": ("Reopen latest document", "/admin/workbench-entry"),
@@ -1457,6 +1584,7 @@ def render_workbench_recovery(
         ),
         "not-wired": ("Back to Glossary", "/admin/workbench/glossary"),
         "invalid": ("Back to Admin", "/admin/overview"),
+        "unresolved-context": ("Open Project Library", "/admin/workbench/"),
     }
     copy = copy_map.get(reason, WORKBENCH_COPY["recovery_invalid"])
     label, href = action_map.get(reason, ("Back to Admin", "/admin/overview"))
@@ -1479,6 +1607,7 @@ def render_workbench_recovery(
         body=body,
         active="recovery",
         csrf_token=csrf_token,
+        show_navigation=reason != "unresolved-context",
     )
 
 
@@ -1486,14 +1615,15 @@ def render_workbench_future(
     *,
     stage: str,
     csrf_token: str,
+    next_href: str | None = None,
 ) -> str:
     """Render the Future / placeholder screen (packet §4.4)."""
     title, copy = _stage_meta(stage)
     body = f"""
 <section class="wb-empty" role="region" aria-label="Workbench future placeholder">
   <p>{_safe_attr(copy)}</p>
-  <a class="wb-button wb-button--secondary" href="/admin/workbench/glossary">
-    Back to Glossary
+  <a class="wb-button wb-button--secondary" href="{_safe_attr(next_href or '/admin/workbench/')}">
+    {"Continue to Glossary" if next_href else "Back to Project Library"}
   </a>
 </section>
 """
@@ -1502,7 +1632,7 @@ def render_workbench_future(
         title=title,
         state=placeholder_state,
         body=body,
-        active="future",
+        active=stage,
         csrf_token=csrf_token,
     )
 
@@ -1510,6 +1640,7 @@ def render_workbench_future(
 __all__ = [
     "WORKBENCH_COPY",
     "WORKBENCH_PLACEHOLDER_STAGES",
+    "render_workbench_document_setup",
     "render_workbench_document_studio",
     "render_workbench_future",
     "render_workbench_glossary",

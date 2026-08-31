@@ -227,7 +227,7 @@ def create_workbench_router(
     *,
     glossary_rehearsal_fixture: object | None = None,
 ) -> APIRouter:
-    """Bounded Workbench Library → Document Studio router (packet §3.1).
+    """Bounded Workbench Project Library → Setup → Glossary router.
 
     The router is mounted inside :func:`create_admin_router` so it reuses
     the same Admin session/CSRF guards. Within this narrow owner-only slice it
@@ -254,6 +254,7 @@ def create_workbench_router(
         get_or_seed_workbench_session,
     )
     from translator_service.admin.workbench_views import (
+        render_workbench_document_setup,
         render_workbench_document_studio,
         render_workbench_future,
         render_workbench_glossary,
@@ -275,11 +276,22 @@ def create_workbench_router(
             )
         )
 
-    def _render_future(*, stage: str) -> HTMLResponse:
-        return _html(render_workbench_future(stage=stage, csrf_token=""))
+    def _render_future(*, stage: str, next_href: str | None = None) -> HTMLResponse:
+        return _html(
+            render_workbench_future(
+                stage=stage,
+                csrf_token="",
+                next_href=next_href,
+            )
+        )
 
     def _studio_location(document_custody_id: str) -> str:
         return "/admin/workbench/studio?document_custody_id=" + quote(
+            document_custody_id, safe=""
+        )
+
+    def _setup_location(document_custody_id: str) -> str:
+        return "/admin/workbench/future?stage=document-setup&document_custody_id=" + quote(
             document_custody_id, safe=""
         )
 
@@ -402,7 +414,7 @@ def create_workbench_router(
         if isinstance(selected, DocumentIntakeDenied):
             return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
         return RedirectResponse(
-            _studio_location(selected.document_custody_id), status_code=HTTPStatus.SEE_OTHER
+            _setup_location(selected.document_custody_id), status_code=HTTPStatus.SEE_OTHER
         )
 
     @router.get("/studio", response_class=HTMLResponse)
@@ -569,7 +581,44 @@ def create_workbench_router(
         if session is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         stage = request.query_params.get("stage") or "translate"
-        return _render_future(stage=stage)
+        custody_id = request.query_params.get("document_custody_id", "")
+        if stage == "document-setup":
+            if session.role is not AdminRole.OWNER:
+                return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
+            if not custody_id:
+                return _render_recovery(reason="unresolved-context")
+            store, storage, actor = _owner_store_and_storage(session)
+            try:
+                selected = select_owner_registered_original_docx_source(
+                    store=store, storage=storage, actor=actor,
+                    document_custody_id=custody_id,
+                )
+                if isinstance(selected, DocumentIntakeDenied):
+                    return _render_recovery(reason="unresolved-context")
+                catalog = catalog_registered_original_docx_sources(
+                    store=store, storage=storage, actor=actor
+                )
+                entry = next(
+                    (
+                        item for item in catalog
+                        if item.document_custody_id == selected.document_custody_id
+                    ),
+                    None,
+                ) if not isinstance(catalog, DocumentIntakeDenied) else None
+            finally:
+                store.close()
+            if entry is None:
+                return _render_recovery(reason="unresolved-context")
+            return _html(
+                render_workbench_document_setup(
+                    file_name=entry.file_name,
+                    source_size_bytes=selected.source_size_bytes,
+                    glossary_href=_studio_location(selected.document_custody_id),
+                    document_setup_href=_setup_location(selected.document_custody_id),
+                )
+            )
+        next_href = None
+        return _render_future(stage=stage, next_href=next_href)
 
     # ------------------------------------------------------------------
     # Mutating POST endpoints — fail-closed at this slice (packet §6).
@@ -837,21 +886,31 @@ def create_admin_router(settings: Settings) -> APIRouter:
         return RedirectResponse("/admin/overview", status_code=HTTPStatus.SEE_OTHER)
 
     @router.get("/login", response_class=HTMLResponse)
-    async def login_form() -> HTMLResponse:
-        return _html(login_page())
+    async def login_form(request: Request) -> HTMLResponse:
+        next_url = request.query_params.get("next")
+        return _html(
+            login_page(
+                next_url=next_url if _safe_admin_next(next_url) else None
+            )
+        )
 
     @router.post("/login", response_class=HTMLResponse)
     async def login(request: Request) -> Response:
         form = await _urlencoded_form(request)
+        next_url = form.get("next")
+        safe_next_url = next_url if _safe_admin_next(next_url) else None
         try:
             cookie_value = session_manager.login(form.get("password", ""))
         except AdminAuthError:
             return _html(
-                login_page(error="Invalid admin credentials."),
+                login_page(
+                    error="Invalid admin credentials.",
+                    next_url=safe_next_url,
+                ),
                 status_code=HTTPStatus.UNAUTHORIZED,
             )
         response = RedirectResponse(
-            "/admin/overview",
+            safe_next_url or "/admin/overview",
             status_code=HTTPStatus.SEE_OTHER,
         )
         response.set_cookie(

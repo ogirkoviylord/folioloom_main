@@ -76,12 +76,23 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)},
             follow_redirects=False,
         )
-        studio = client.get(selected.headers["location"])
+        self.assertTrue(
+            selected.headers["location"].startswith(
+                "/admin/workbench/future?stage=document-setup&"
+            )
+        )
+        setup = client.get(selected.headers["location"])
+        studio_location = re.search(
+            r'href="([^"]*/admin/workbench/studio\?document_custody_id=[^"]+)"',
+            setup.text,
+        )
+        assert studio_location is not None
+        studio = client.get(studio_location.group(1))
         parent = re.search(
             r'name="expected_parent_revision_id" value="([^\"]+)"', studio.text
         )
         assert parent is not None
-        return client, database_path, storage_root, csrf.group(1), custody.group(1), parent.group(1), selected.headers["location"]
+        return client, database_path, storage_root, csrf.group(1), custody.group(1), parent.group(1), studio_location.group(1)
 
     def _workbench_glossary_counts(self, database_path: Path) -> tuple[int, int]:
         store = SQLiteTranslationJobStore(database_path)
@@ -854,8 +865,9 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         library = client.get("/admin/workbench/")
         legacy_query = client.get("/admin/workbench/?document=legacy-opaque")
         self.assertEqual(legacy_query.status_code, 200)
-        self.assertIn("<h1>Library</h1>", legacy_query.text)
-        self.assertNotIn("/admin/workbench/glossary", legacy_query.text)
+        self.assertIn("<h1>Project Library</h1>", legacy_query.text)
+        self.assertIn("Project Library", legacy_query.text)
+        self.assertIn("Glossary", legacy_query.text)
         csrf = re.search(r'name="csrf_token" value="([^"]+)"', library.text)
         assert csrf is not None
         uploaded = client.post("/admin/workbench/upload", data={"csrf_token": csrf.group(1)}, files={"file": ("book.docx", _docx_bytes(), "application/octet-stream")}, follow_redirects=False)
@@ -864,16 +876,50 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         custody = re.search(r'name="document_custody_id" value="([^"]+)"', catalog.text)
         assert custody is not None
         selected = client.post("/admin/workbench/select", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)}, follow_redirects=False)
-        self.assertTrue(selected.headers["location"].startswith("/admin/workbench/studio?"))
-        studio = client.get(selected.headers["location"])
-        self.assertIn("Document Studio", studio.text)
+        self.assertTrue(selected.headers["location"].startswith("/admin/workbench/future?stage=document-setup&"))
+        setup = client.get(selected.headers["location"])
+        self.assertIn("Review this document, then continue to its glossary.", setup.text)
+        setup_nav = re.search(
+            r'<a class="wb-nav__link" href="([^"]+)" aria-current="page">'
+            r"<span>Document Setup</span>",
+            setup.text,
+        )
+        assert setup_nav is not None
+        self.assertEqual(setup_nav.group(1).replace("&amp;", "&"), selected.headers["location"])
+        selected_setup = client.get(setup_nav.group(1).replace("&amp;", "&"))
+        self.assertEqual(selected_setup.status_code, 200)
+        studio_location = re.search(r'href="([^"]*/admin/workbench/studio\?document_custody_id=[^"]+)"', setup.text)
+        assert studio_location is not None
+        selected_setup_studio_location = re.search(
+            r'href="([^"]*/admin/workbench/studio\?document_custody_id=[^"]+)"',
+            selected_setup.text,
+        )
+        assert selected_setup_studio_location is not None
+        self.assertEqual(selected_setup_studio_location.group(1), studio_location.group(1))
+        setup_main = re.search(r"<main[^>]*>(.*?)</main>", setup.text, re.DOTALL)
+        assert setup_main is not None
+        setup_visible_text = re.sub(r"<[^>]+>", "", setup_main.group(1))
+        self.assertNotIn("Document Studio", setup_visible_text)
+        self.assertNotIn("document_custody_id", setup_visible_text)
+        self.assertNotIn(custody.group(1), setup_visible_text)
+        tampered_setup = client.get(
+            "/admin/workbench/future?stage=document-setup&"
+            "document_custody_id=tampered-workbench-selection"
+        )
+        self.assertEqual(tampered_setup.status_code, 200)
+        self.assertNotIn("tampered-workbench-selection", tampered_setup.text)
+        self.assertIn("Open Project Library", tampered_setup.text)
+        self.assertNotIn("Continue to Glossary", tampered_setup.text)
+        studio = client.get(studio_location.group(1))
+        self.assertIn("<h1>Glossary</h1>", studio.text)
+        self.assertNotIn("<h1>Document Studio</h1>", studio.text)
         self.assertNotIn("Admin Console", studio.text)
         self.assertIn('id="add-glossary-row"', studio.text)
         self.assertIn("appendChild(row)", studio.text)
         parent = re.search(r'name="expected_parent_revision_id" value="([^"]+)"', studio.text)
         assert parent is not None
         created = client.post("/admin/workbench/studio/save", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1), "expected_parent_revision_id": parent.group(1), "source_language": "en", "target_language": "ru", "source_term": ["Term", "Second"], "target_term": ["Термин", "Второй"], "entry_type": ["term", "name"]}, follow_redirects=False)
-        self.assertEqual(created.headers["location"], selected.headers["location"])
+        self.assertEqual(created.headers["location"], studio_location.group(1))
         store = SQLiteTranslationJobStore(root / "workbench-jobs.sqlite3")
         try:
             payload = store._connection.execute(
@@ -891,9 +937,10 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             {entry.category for entry in saved_snapshot.entries}, {"term", "name"}
         )
         locked = client.post("/admin/workbench/studio/lock", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)}, follow_redirects=False)
-        self.assertEqual(locked.headers["location"], selected.headers["location"])
+        self.assertEqual(locked.headers["location"], studio_location.group(1))
         locked_studio = client.get(locked.headers["location"])
-        self.assertIn("lock state: active", locked_studio.text)
+        self.assertIn("This glossary is read-only.", locked_studio.text)
+        self.assertNotIn("lock state", locked_studio.text)
         self.assertIn("disabled", locked_studio.text)
         locked_save = client.post(
             "/admin/workbench/studio/save",

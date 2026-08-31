@@ -1230,6 +1230,21 @@ class AdminRoutesTest(unittest.TestCase):
         self.assertNotIn("Beta Controls", primary_nav)
         self.assertEqual(overview.headers["cache-control"], "no-store")
 
+    def test_login_can_return_to_safe_admin_target(self):
+        form = self.client.get("/admin/login?next=/admin/settings")
+
+        self.assertEqual(form.status_code, 200)
+        self.assertIn('name="next" value="/admin/settings"', form.text)
+
+        login = self.client.post(
+            "/admin/login",
+            data={"password": "owner-pass", "next": "/admin/settings"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(login.status_code, 303)
+        self.assertEqual(login.headers["location"], "/admin/settings")
+
     def test_settings_page_consolidates_b41_ia(self):
         self.client.post("/admin/login", data={"password": "owner-pass"})
 

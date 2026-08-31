@@ -54,6 +54,26 @@ Canonical gate document: `docs/CAT_WORKFLOW_GATES.md`
 - Export to usable document formats.
 - Telegram harness for convenient upload/delivery/testing.
 
+### Deferred document setup and glossary assistance requirements
+
+These are owner-recorded future product requirements. They do not approve
+implementation, provider calls, persistent document settings, runtime activation
+or a translation-quality claim.
+
+- **Source language:** Document Setup should detect the probable original
+  language after document load, show uncertainty or mixed-language results
+  honestly, and allow an author to correct the detected value.
+- **Target language:** Document Setup should use a selection control backed by
+  a maintained catalog of supported target languages, rather than accepting an
+  arbitrary free-text value. Adding or changing supported targets remains a
+  separate quality/profile and product decision.
+- **Glossary assistance:** After document load, AI may create glossary
+  candidates for terms, names, places, entities and recurring phrases. They
+  remain suggestions: the author must be able to approve, edit, reject,
+  regenerate or refine them, with literal meaning/back-translation/explanation
+  where useful. A generated candidate set is not an automatically approved
+  glossary or evidence that automatic glossary runtime is ready.
+
 ## 4. Текущая стадия проекта
 
 Стадия: active development / CAT-like workflow reframe.

@@ -21,6 +21,16 @@
 - Deferred future ideas: (1) a distraction-free editor/focus mode that can hide surrounding chrome while retaining editor capability; (2) a warm, low-strain comfort-reading mode for an author rereading work; (3) selectable curated visual skins and later, potentially constrained palette choice. These belong in later UI/settings exploration, not the current primary screens. The comfort-reading control should not be placed on the main Workbench surface by default; palette customization must preserve readable contrast and semantic status colors rather than become arbitrary per-element color editing.
 - Boundary: This does not approve code, a production UI, role/auth changes, reader/editor implementation, settings implementation, release claims, or a decision to expose raw manuscript text outside the authorized project context.
 
+### Document Setup prototype boundary and contract
+
+- Status: Active / owner-approved implementation boundary.
+- Summary: Retain and amend the existing **OWNER-only** `Project Library → Document Setup → Glossary` flow as a narrow, author-centred orientation-and-handoff surface. Document Setup itself displays the selected DOCX context, has one primary continuation to the same existing Glossary destination, and does not save setup choices or start translation.
+- Durable boundary: The existing Glossary destination remains owner-gated and durable; this decision neither makes it local/non-durable nor changes its authority, revision, save or lock behavior. Document Setup must not describe the whole chained flow as local/non-authoritative.
+- Immediate state model: selected DOCX plus one generic fail-closed unresolved-context recovery. Empty/no-selection, unsupported, stale/changed and temporarily-unavailable states remain deferred until a controller-owned typed trigger and safe action semantics are separately approved.
+- UX/copy boundary: Show selected filename and `Source format: DOCX`, a single primary `Continue to Glossary`, subordinate `Back to Project Library`, and a short Setup-only limitation. A compact disclosure may say that source language, target language and AI-assisted glossary terms are not part of Document Setup yet; it must be non-interactive and must not become a roadmap, capability promise or lifecycle claim.
+- Deferred: source-language detection/correction, target-language catalog, AI glossary generation/candidates, broader format support, role/auth expansion, URL/context propagation changes, typed recovery states, and persistence/runtime binding of Setup choices.
+- Boundary: This decision approves no provider/runtime/translation execution, schema/migration/cache/retention work, strict-DOCX change, route/URL change, raw-text exposure, Telegram/server/deploy action, payment, quality or release claim. A future implementation card must stay within this contract and receive independent review.
+
 ### Contextual terminology review and revision flow
 
 - Status: Deferred / accepted product direction.
