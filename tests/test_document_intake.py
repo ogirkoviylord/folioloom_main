@@ -878,7 +878,7 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         selected = client.post("/admin/workbench/select", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)}, follow_redirects=False)
         self.assertTrue(selected.headers["location"].startswith("/admin/workbench/future?stage=document-setup&"))
         setup = client.get(selected.headers["location"])
-        self.assertIn("Document Setup is not in this slice.", setup.text)
+        self.assertIn("Review this document, then continue to its glossary.", setup.text)
         setup_nav = re.search(
             r'<a class="wb-nav__link" href="([^"]+)" aria-current="page">'
             r"<span>Document Setup</span>",
@@ -906,8 +906,10 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             "/admin/workbench/future?stage=document-setup&"
             "document_custody_id=tampered-workbench-selection"
         )
-        self.assertEqual(tampered_setup.status_code, 404)
+        self.assertEqual(tampered_setup.status_code, 200)
         self.assertNotIn("tampered-workbench-selection", tampered_setup.text)
+        self.assertIn("Open Project Library", tampered_setup.text)
+        self.assertNotIn("Continue to Glossary", tampered_setup.text)
         studio = client.get(studio_location.group(1))
         self.assertIn("<h1>Glossary</h1>", studio.text)
         self.assertNotIn("<h1>Document Studio</h1>", studio.text)

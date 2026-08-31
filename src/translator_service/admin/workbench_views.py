@@ -54,6 +54,7 @@ WORKBENCH_NAV_STAGES: tuple[tuple[str, str], ...] = (
 
 
 #: Honest placeholder stages (packet §3.2 nav rail + §4.4 future screen).
+#: Document Setup keeps its tag outside its implemented active orientation view.
 WORKBENCH_PLACEHOLDER_STAGES: tuple[tuple[str, str], ...] = (
     ("document-setup", "Document Setup"),
     ("translate", "Translate"),
@@ -288,6 +289,11 @@ def _workbench_css() -> str:
 }
 .wb-card h3 { margin: 0 0 8px 0; font-size: 1rem; }
 .wb-card p { margin: 0; color: var(--wb-ink-soft); }
+.wb-document-setup {
+  display: grid;
+  gap: 12px;
+}
+.wb-document-setup .wb-button { display: inline-block; justify-self: start; }
 .wb-strip {
   border-radius: var(--wb-radius-md);
   padding: 12px 16px;
@@ -617,10 +623,13 @@ def _workbench_nav(
             href = _safe_attr(resolved_glossary_href)
         else:
             href = f"/admin/workbench/future?stage={_safe_attr(stage_key)}"
+        is_active_document_setup = (
+            stage_key == "document-setup" and active == "document-setup"
+        )
         placeholder_tag = (
             '<span class="wb-nav__placeholder-tag" aria-label="placeholder">'
             "not in slice</span>"
-            if stage_key in placeholder_keys
+            if stage_key in placeholder_keys and not is_active_document_setup
             else ""
         )
         if stage_key == "document-setup" and not document_setup_href:
@@ -1198,6 +1207,7 @@ def _workbench_page(
     active: str = "glossary",
     csrf_token: str | None = None,
     not_wired_after_post: bool = False,
+    show_navigation: bool = True,
 ) -> str:
     safe_title = _safe_attr(title)
     safe_doc_id = _safe_attr(state.document.document_id or "")
@@ -1229,7 +1239,11 @@ def _workbench_page(
         document_id=state.document.document_id,
         ephemeral_session_id=state.session_id,
     )
-    nav = _workbench_nav(active, state.document.document_id or None)
+    nav = (
+        _workbench_nav(active, state.document.document_id or None)
+        if show_navigation
+        else ""
+    )
     helper_rail = _workbench_helper_rail(state)
     csrf_token = csrf_token or ""
     return f"""<!doctype html>
@@ -1447,14 +1461,19 @@ def render_workbench_document_setup(
     glossary_href: str,
     document_setup_href: str,
 ) -> str:
-    """Render the selected-document setup placeholder without setup claims."""
+    """Render the selected-document setup orientation without setup controls."""
     body = (
-        "<section class=\"wb-card\"><p><a href=\"/admin/workbench/\">← Project Library</a></p>"
-        "<h1>Document Setup</h1>"
-        f"<p><strong>{_safe_attr(file_name)}</strong> · DOCX · {source_size_bytes} bytes</p>"
-        "<p>Document Setup is not in this slice. No setup choices are available yet.</p>"
+        "<section class=\"wb-card wb-document-setup\"><h1>Document Setup</h1>"
+        f"<p><strong>{_safe_attr(file_name)}</strong></p>"
+        "<p>Source format: DOCX</p>"
+        "<p>Review this document, then continue to its glossary.</p>"
         f"<a class=\"wb-button wb-button--primary\" href=\"{_safe_attr(glossary_href)}\">"
-        "Continue to Glossary</a></section>"
+        "Continue to Glossary</a>"
+        "<p>Document Setup does not save setup choices or start translation.</p>"
+        "<p>Source language, target language, and AI-assisted glossary terms are not "
+        "part of Document Setup yet.</p>"
+        "<p><a class=\"wb-button wb-button--secondary\" href=\"/admin/workbench/\">"
+        "Back to Project Library</a></p></section>"
     )
     return _durable_workbench_page(
         title="Document Setup",
@@ -1546,13 +1565,16 @@ def render_workbench_recovery(
 ) -> str:
     """Render the Recovery screen (packet §4.3).
 
-    Reasons: ``stale``, ``unavailable``, ``not-wired``, ``invalid``.
+    Reasons: ``stale``, ``unavailable``, ``not-wired``, ``invalid``, and the
+    Document Setup-only ``unresolved-context`` recovery.
     """
     copy_map = {
         "stale": WORKBENCH_COPY["recovery_stale"],
         "unavailable": WORKBENCH_COPY["recovery_unavailable"],
         "not-wired": WORKBENCH_COPY["recovery_not_wired"],
         "invalid": WORKBENCH_COPY["recovery_invalid"],
+        "unresolved-context": "This document setup is unavailable. Open Project "
+        "Library to select a document.",
     }
     action_map = {
         "stale": ("Reopen latest document", "/admin/workbench-entry"),
@@ -1562,6 +1584,7 @@ def render_workbench_recovery(
         ),
         "not-wired": ("Back to Glossary", "/admin/workbench/glossary"),
         "invalid": ("Back to Admin", "/admin/overview"),
+        "unresolved-context": ("Open Project Library", "/admin/workbench/"),
     }
     copy = copy_map.get(reason, WORKBENCH_COPY["recovery_invalid"])
     label, href = action_map.get(reason, ("Back to Admin", "/admin/overview"))
@@ -1584,6 +1607,7 @@ def render_workbench_recovery(
         body=body,
         active="recovery",
         csrf_token=csrf_token,
+        show_navigation=reason != "unresolved-context",
     )
 
 
