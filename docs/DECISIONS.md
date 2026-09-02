@@ -166,8 +166,14 @@ This file contains active project decisions in summary-first form. Full historic
 - Summary: Retain the existing glossary contracts, scanner/candidate-quality paths, selection, context rendering and diagnostics as reusable engine foundations. Automatic candidates are suggestions; a prepared package or runtime observation is not author authority or quality proof.
 - Authority: A future author-approved glossary must use an explicit approval/lock lifecycle bound to a precise snapshot and document context. Existing entry statuses (`owner_pinned` / `locked`) and signatures do not by themselves establish that lifecycle.
 - Runtime: Persistent resolver/runtime code is durable but deferred infrastructure, not the Workbench product authority. Telegram remains a harness, not the authority model.
-- Next decision: approve or reject the bounded in-memory DOCX local-snapshot-lock contract recorded in `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md` before a new coder card is created.
+- Next decision: implementation and independent review of the approved durable DOCX authoring envelope below.
 - Boundary: This does not approve durable custody, upload/parser work, provider calls, real translation/runtime integration, cache changes, DB/storage, Telegram/server operations, export, release or quality claims.
+
+### Durable DOCX Glossary authoring envelope
+
+- Status: Active / owner-approved implementation boundary (Council #2144; owner approval #2145, 2026-08-31).
+- Summary: For an already registered owner DOCX, the Studio holds only a browser-local whole-snapshot working copy. `Approve and create revision` atomically creates an immediately-approved immutable exact-parent revision; it is an editable authoring record only and is not used by translation in this slice.
+- Lock: `Make this revision read-only` is separately confirmed, document-level and irreversible in this slice. It preserves history and prevents successor authoring; recovery is re-import as a new document/custody. Durable drafts, per-term mutations/locks, unlock/revoke, runtime binding and Gate 1/quality claims remain out of scope.
 
 ## Active Release / Safety Decisions
 

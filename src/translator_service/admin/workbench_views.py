@@ -1349,7 +1349,7 @@ def _durable_workbench_page(
 
 
 def render_workbench_library(
-    *, csrf_token: str, catalog: Iterable[OwnerDocumentCatalogEntry]
+    *, csrf_token: str, catalog: Iterable[OwnerDocumentCatalogEntry], selection_tokens: dict[str, str] | None = None
 ) -> str:
     """Render imported DOCX documents as the first Workbench screen."""
     document_cards = "".join(
@@ -1358,7 +1358,7 @@ def render_workbench_library(
         f"<p>Imported DOCX · {entry.source_size_bytes} bytes</p>"
         "<form method=\"post\" action=\"/admin/workbench/select\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
-        f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(entry.document_custody_id)}\">"
+        f"<input type=\"hidden\" name=\"document_selection\" value=\"{_safe_attr((selection_tokens or {}).get(entry.document_custody_id, 'opaque-selection'))}\">"
         "<button type=\"submit\">Continue to Document Setup</button></form></li>"
         for entry in catalog
     )
@@ -1394,55 +1394,85 @@ def render_workbench_library(
 def render_workbench_document_studio(
     *,
     csrf_token: str,
-    document_custody_id: str,
+    document_selection: str,
     file_name: str,
     source_size_bytes: int,
-    expected_parent_revision_id: str | None,
+    expected_parent_selection: str,
     revision_sequence: int | None,
     lock_status: str,
+    projection: object | None = None,
 ) -> str:
     """Render the durable glossary editor with author-facing copy."""
     locked = lock_status == "active"
     disabled = " disabled" if locked else ""
-    parent = expected_parent_revision_id or "no-parent"
-    editor = (
-        "<form method=\"post\" action=\"/admin/workbench/studio/save\">"
-        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
-        f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(document_custody_id)}\">"
-        f"<input type=\"hidden\" name=\"expected_parent_revision_id\" value=\"{_safe_attr(parent)}\">"
-        f"<fieldset{disabled}><legend>Glossary</legend>"
-        "<label>Source language <input name=\"source_language\" required></label>"
-        "<label>Target language <input name=\"target_language\" required></label>"
-        "<div id=\"glossary-rows\"><fieldset><legend>Glossary row</legend>"
+
+    rows = getattr(projection, "rows", ())
+    source_language = _safe_attr(getattr(projection, "source_language", ""))
+    target_language = _safe_attr(getattr(projection, "target_language", ""))
+    row_html = "".join(
+        "<fieldset><legend>Glossary row</legend>"
+        f"<label>Source term <input name=\"source_term\" value=\"{_safe_attr(row.source_term)}\" required></label>"
+        f"<label>Target term <input name=\"target_term\" value=\"{_safe_attr(row.target_term)}\" required></label>"
+        "<label>Type <select name=\"entry_type\">"
+        f"<option value=\"term\"{' selected' if row.entry_type == 'term' else ''}>Term</option>"
+        f"<option value=\"name\"{' selected' if row.entry_type == 'name' else ''}>Name</option>"
+        "</select></label><button type=\"button\" class=\"remove-glossary-row\">Remove row</button></fieldset>"
+        for row in rows
+    ) or (
+        "<fieldset><legend>Glossary row</legend>"
         "<label>Source term <input name=\"source_term\" required></label>"
         "<label>Target term <input name=\"target_term\" required></label>"
         "<label>Type <select name=\"entry_type\"><option value=\"term\">Term</option><option value=\"name\">Name</option></select></label>"
-        "</fieldset></div><button type=\"button\" id=\"add-glossary-row\">Add glossary row</button>"
-        "<button type=\"submit\">Save glossary</button></fieldset></form>"
+        "<button type=\"button\" class=\"remove-glossary-row\">Remove row</button></fieldset>"
+    )
+    editor = (
+        "<form method=\"post\" action=\"/admin/workbench/studio/save\">"
+        f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
+        f"<input type=\"hidden\" name=\"document_selection\" value=\"{_safe_attr(document_selection)}\">"
+        f"<input type=\"hidden\" name=\"expected_parent_selection\" value=\"{_safe_attr(expected_parent_selection)}\">"
+        f"<fieldset{disabled}><legend>Glossary</legend>"
+        f"<label>Source language <input name=\"source_language\" value=\"{source_language}\" required></label>"
+        f"<label>Target language <input name=\"target_language\" value=\"{target_language}\" required></label>"
+        f"<div id=\"glossary-rows\">{row_html}</div><button type=\"button\" id=\"add-glossary-row\">Add glossary row</button>"
+        "<button type=\"submit\">Approve and create revision</button></fieldset></form>"
         "<script>document.getElementById('add-glossary-row').addEventListener('click', function () {"
         "const row = document.createElement('fieldset');"
-        "row.innerHTML = '<legend>Glossary row</legend><label>Source term <input name=\"source_term\" required></label><label>Target term <input name=\"target_term\" required></label><label>Type <select name=\"entry_type\"><option value=\"term\">Term</option><option value=\"name\">Name</option></select></label>';"
-        "document.getElementById('glossary-rows').appendChild(row);});</script>"
+        "row.innerHTML = '<legend>Glossary row</legend><label>Source term <input name=\"source_term\" required></label><label>Target term <input name=\"target_term\" required></label><label>Type <select name=\"entry_type\"><option value=\"term\">Term</option><option value=\"name\">Name</option></select></label><button type=\"button\" class=\"remove-glossary-row\">Remove row</button>';"
+        "document.getElementById('glossary-rows').appendChild(row);});"
+        "document.getElementById('glossary-rows').addEventListener('click', function (event) {"
+        "if (event.target.classList.contains('remove-glossary-row')) event.target.closest('fieldset').remove();"
+        "});</script>"
     )
-    lock_form = "" if locked else (
+    safe_rows = "".join(
+        "<li>" + _safe_attr(row.source_term) + " → "
+        + _safe_attr(row.target_term) + " (" + _safe_attr(row.entry_type) + ")</li>"
+        for row in rows
+    )
+    lock_form = "" if locked or revision_sequence is None else (
         "<form method=\"post\" action=\"/admin/workbench/studio/lock\">"
         f"<input type=\"hidden\" name=\"csrf_token\" value=\"{_safe_attr(csrf_token)}\">"
-        f"<input type=\"hidden\" name=\"document_custody_id\" value=\"{_safe_attr(document_custody_id)}\">"
-        "<button type=\"submit\">Make glossary read-only</button></form>"
+        f"<input type=\"hidden\" name=\"document_selection\" value=\"{_safe_attr(document_selection)}\">"
+        f"<input type=\"hidden\" name=\"expected_revision_selection\" value=\"{_safe_attr(expected_parent_selection)}\">"
+        f"<p>Revision {revision_sequence} will become read-only. This authoring record is not used by translation in this slice.</p>"
+        f"<ul aria-label=\"Revision {revision_sequence} glossary rows\">{safe_rows}</ul>"
+        "<p>There is no unlock in this slice. Recovery requires re-importing as a new document.</p>"
+        "<label><input type=\"checkbox\" name=\"confirm_read_only\" value=\"confirmed\" required> I understand this cannot be unlocked.</label>"
+        "<button type=\"submit\">Make this revision read-only</button></form>"
     )
-    glossary_href = (
-        "/admin/workbench/studio?document_custody_id="
-        + quote(document_custody_id, safe="")
-    )
-    document_setup_href = (
-        "/admin/workbench/future?stage=document-setup&document_custody_id="
-        + quote(document_custody_id, safe="")
-    )
+    glossary_href = "/admin/workbench/studio?selection=" + quote(document_selection, safe="")
+    document_setup_href = "/admin/workbench/future?stage=document-setup&selection=" + quote(document_selection, safe="")
     body = (
         "<section class=\"wb-card\"><p><a href=\"/admin/workbench/\">← Project Library</a></p>"
         "<h1>Glossary</h1>"
         f"<p><strong>{_safe_attr(file_name)}</strong> · DOCX · {source_size_bytes} bytes</p>"
-        + ("<p>This glossary is read-only.</p>" if locked else "")
+        + (
+            f"<p>Locked revision {revision_sequence} — read-only authoring record only; not used by translation in this slice.</p>"
+            if locked else (
+                f"<p>Approved revision {revision_sequence} — editable authoring record only; not used by translation in this slice.</p>"
+                if revision_sequence is not None
+                else "<p>No approved revision</p>"
+            )
+        )
         + editor + lock_form + "</section>"
     )
     return _durable_workbench_page(
