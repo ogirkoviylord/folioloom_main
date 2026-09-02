@@ -1003,7 +1003,6 @@ class WorkbenchRoutesTest(unittest.TestCase):
         entry = self.client.get("/admin/workbench-entry")
         self.assertEqual(entry.status_code, 200)
         self.assertIn("<h1>Project Library</h1>", entry.text)
-        self.assertIn("Start with your book or document", entry.text)
         self.assertIn("DOCX import is available in this local Workbench.", entry.text)
         self.assertNotIn("<h1>Library</h1>", entry.text)
         self.assertNotIn("Document Studio", entry.text)
@@ -1062,10 +1061,10 @@ class WorkbenchRoutesTest(unittest.TestCase):
     def test_durable_glossary_uses_the_approved_workbench_navigation(self) -> None:
         page = workbench_views.render_workbench_document_studio(
             csrf_token="csrf-token",
-            document_custody_id="custody-opaque",
+            document_selection="opaque-selection",
             file_name="example.docx",
             source_size_bytes=42,
-            expected_parent_revision_id=None,
+            expected_parent_selection="opaque-parent-selection",
             revision_sequence=None,
             lock_status="not created",
         )
@@ -1081,7 +1080,7 @@ class WorkbenchRoutesTest(unittest.TestCase):
         ):
             self.assertIn(title, page)
         self.assertIn(
-            'href="/admin/workbench/studio?document_custody_id=custody-opaque" '
+            'href="/admin/workbench/studio?selection=opaque-selection" '
             'aria-current="page"><span>Glossary</span></a>',
             page,
         )

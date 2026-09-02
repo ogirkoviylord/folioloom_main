@@ -10,6 +10,7 @@ from translator_service.admin.rbac import AdminRole
 from translator_service.document_glossary_authoring_bridge import (
     DocumentGlossaryAuthoringBridgeDenied,
     author_document_glossary_revision,
+    read_current_document_glossary_editable_projection,
     read_current_document_glossary_revision,
 )
 from translator_service.document_glossary_lock_attestation import (
@@ -136,6 +137,28 @@ class DocumentGlossaryAuthoringBridgeTest(unittest.TestCase):
         )
         self.assertEqual(_count(self.store, "document_glossary_revisions"), 1)
         self.assertEqual(_count(self.store, "document_glossary_revision_events"), 1)
+
+    def test_current_editable_projection_exposes_only_canonical_fields(self):
+        author_document_glossary_revision(
+            store=self.store, storage=self.storage, session=self.session,
+            document_custody_id=self.custody_id, snapshot=_snapshot(),
+            expected_parent_revision_id=None,
+        )
+
+        projection = read_current_document_glossary_editable_projection(
+            store=self.store, storage=self.storage, session=self.session,
+            document_custody_id=self.custody_id,
+        )
+
+        if isinstance(projection, DocumentGlossaryAuthoringBridgeDenied):
+            self.fail(projection.code)
+        self.assertEqual(projection.source_language, "en")
+        self.assertEqual(projection.target_language, "ru")
+        self.assertEqual(projection.rows[0].source_term, "Term")
+        self.assertEqual(projection.rows[0].target_term, "")
+        self.assertEqual(projection.rows[0].entry_type, "term")
+        for forbidden in ("snapshot_payload", "snapshot_digest", "approval_id", "custody_id"):
+            self.assertFalse(hasattr(projection, forbidden))
 
     def test_active_lock_rejects_successor_without_durable_write(self):
         first = author_document_glossary_revision(
