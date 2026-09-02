@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # ruff: noqa: E501
+import hmac
 import json
 import re
 import sqlite3
@@ -155,6 +156,7 @@ from translator_service.config import Settings
 from translator_service.document_glossary_authoring_bridge import (
     DocumentGlossaryAuthoringBridgeDenied,
     author_document_glossary_revision,
+    read_current_document_glossary_editable_projection,
     read_current_document_glossary_revision,
 )
 from translator_service.document_glossary_editor import (
@@ -285,15 +287,34 @@ def create_workbench_router(
             )
         )
 
-    def _studio_location(document_custody_id: str) -> str:
-        return "/admin/workbench/studio?document_custody_id=" + quote(
-            document_custody_id, safe=""
-        )
+    def _selection_token(
+        session: AdminSession, document_custody_id: str, *, purpose: str, revision_id: str = ""
+    ) -> str:
+        payload = "\0".join((session.actor_id, session.csrf_token, purpose, document_custody_id, revision_id))
+        return hmac.digest(settings.admin_session_secret.encode("utf-8"), payload.encode("utf-8"), "sha256").hex()
 
-    def _setup_location(document_custody_id: str) -> str:
-        return "/admin/workbench/future?stage=document-setup&document_custody_id=" + quote(
-            document_custody_id, safe=""
+    def _selected_document_for_token(store, storage, actor, session: AdminSession, token: str):
+        catalog = catalog_registered_original_docx_sources(store=store, storage=storage, actor=actor)
+        if isinstance(catalog, DocumentIntakeDenied):
+            return None, None
+        entry = next(
+            (item for item in catalog if hmac.compare_digest(
+                _selection_token(session, item.document_custody_id, purpose="document"), token
+            )),
+            None,
         )
+        if entry is None:
+            return None, None
+        selected = select_owner_registered_original_docx_source(
+            store=store, storage=storage, actor=actor, document_custody_id=entry.document_custody_id
+        )
+        return (None, None) if isinstance(selected, DocumentIntakeDenied) else (selected, entry)
+
+    def _studio_location(selection: str) -> str:
+        return "/admin/workbench/studio?selection=" + quote(selection, safe="")
+
+    def _setup_location(selection: str) -> str:
+        return "/admin/workbench/future?stage=document-setup&selection=" + quote(selection, safe="")
 
     def _owner_store_and_storage(session: AdminSession):
         return (
@@ -354,6 +375,12 @@ def create_workbench_router(
             render_workbench_library(
                 csrf_token=session.csrf_token,
                 catalog=() if isinstance(catalog, DocumentIntakeDenied) else catalog,
+                selection_tokens={
+                    entry.document_custody_id: _selection_token(
+                        session, entry.document_custody_id, purpose="document"
+                    )
+                    for entry in (() if isinstance(catalog, DocumentIntakeDenied) else catalog)
+                },
             )
         )
 
@@ -405,16 +432,15 @@ def create_workbench_router(
             return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
         store, storage, actor = _owner_store_and_storage(session)
         try:
-            selected = select_owner_registered_original_docx_source(
-                store=store, storage=storage, actor=actor,
-                document_custody_id=form.get("document_custody_id", ""),
+            selected, _entry = _selected_document_for_token(
+                store, storage, actor, session, form.get("document_selection", "")
             )
         finally:
             store.close()
-        if isinstance(selected, DocumentIntakeDenied):
+        if selected is None:
             return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
         return RedirectResponse(
-            _setup_location(selected.document_custody_id), status_code=HTTPStatus.SEE_OTHER
+            _setup_location(form.get("document_selection", "")), status_code=HTTPStatus.SEE_OTHER
         )
 
     @router.get("/studio", response_class=HTMLResponse)
@@ -422,45 +448,40 @@ def create_workbench_router(
         session = _owner_session_or_none(request, session_manager)
         if session is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
-        custody_id = request.query_params.get("document_custody_id", "")
+        selection = request.query_params.get("selection", "")
         store, storage, actor = _owner_store_and_storage(session)
         try:
-            selected = select_owner_registered_original_docx_source(
-                store=store, storage=storage, actor=actor, document_custody_id=custody_id
-            )
-            if isinstance(selected, DocumentIntakeDenied):
+            selected, entry = _selected_document_for_token(store, storage, actor, session, selection)
+            if selected is None or entry is None:
                 return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
-            catalog = catalog_registered_original_docx_sources(
-                store=store, storage=storage, actor=actor
-            )
-            entry = next(
-                (
-                    item
-                    for item in catalog
-                    if item.document_custody_id == selected.document_custody_id
-                ),
-                None,
-            ) if not isinstance(catalog, DocumentIntakeDenied) else None
-            if entry is None:
-                return _html("Document not found", status_code=HTTPStatus.NOT_FOUND)
+            custody_id = selected.document_custody_id
             revision = read_current_document_glossary_revision(
                 store=store, storage=storage, session=session, document_custody_id=custody_id
             )
             if isinstance(revision, DocumentGlossaryAuthoringBridgeDenied):
-                sequence, parent, lock_status = None, None, "not created"
+                sequence, parent, lock_status, projection = None, None, "not created", None
             else:
                 lock = read_document_glossary_lock_status(
                     store=store, storage=storage, session=session, document_custody_id=custody_id
                 )
                 if isinstance(lock, DocumentGlossaryLockDenied):
                     return _html("Glossary lock unavailable", status_code=HTTPStatus.NOT_FOUND)
+                projection = read_current_document_glossary_editable_projection(
+                    store=store, storage=storage, session=session,
+                    document_custody_id=custody_id,
+                )
+                if isinstance(projection, DocumentGlossaryAuthoringBridgeDenied):
+                    return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
                 sequence, parent, lock_status = revision.revision_sequence, revision.revision_id, lock.status
         finally:
             store.close()
         return _html(render_workbench_document_studio(
-            csrf_token=session.csrf_token, document_custody_id=selected.document_custody_id,
+            csrf_token=session.csrf_token, document_selection=selection,
             file_name=entry.file_name, source_size_bytes=selected.source_size_bytes,
-            expected_parent_revision_id=parent, revision_sequence=sequence, lock_status=lock_status,
+            expected_parent_selection=_selection_token(
+                session, custody_id, purpose="parent", revision_id=parent or "no-parent"
+            ), revision_sequence=sequence, lock_status=lock_status,
+            projection=projection,
         ))
 
     @router.post("/studio/save", response_class=HTMLResponse)
@@ -471,20 +492,14 @@ def create_workbench_router(
         form = await _urlencoded_form(request)
         if not session_manager.verify_csrf(session, form.get("csrf_token")):
             return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
-        valid_parent, parent = _parse_document_glossary_expected_parent(form.get("expected_parent_revision_id"))
-        if not valid_parent:
-            return _html("Glossary revision unavailable", status_code=HTTPStatus.BAD_REQUEST)
-        custody_id = form.get("document_custody_id", "")
+        store, storage, actor = _owner_store_and_storage(session)
         try:
-            snapshot = build_owner_pinned_glossary_snapshot(
-                source_language=form.get("source_language", ""), target_language=form.get("target_language", ""),
-                source_terms=form.getlist("source_term"), target_terms=form.getlist("target_term"),
-                entry_types=form.getlist("entry_type"),
+            selected, _entry = _selected_document_for_token(
+                store, storage, actor, session, form.get("document_selection", "")
             )
-        except OwnerGlossaryEditorInputError:
-            return _html("Glossary editor input invalid", status_code=HTTPStatus.BAD_REQUEST)
-        store, storage, _actor = _owner_store_and_storage(session)
-        try:
+            if selected is None:
+                return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
+            custody_id = selected.document_custody_id
             current = read_current_document_glossary_revision(
                 store=store, storage=storage, session=session,
                 document_custody_id=custody_id,
@@ -494,14 +509,45 @@ def create_workbench_router(
                     store=store, storage=storage, session=session,
                     document_custody_id=custody_id,
                 )
-                if isinstance(status, DocumentGlossaryLockDenied) or status.status == "active":
+                if isinstance(status, DocumentGlossaryLockDenied):
                     return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
+                if status.status == "active":
+                    return _html(
+                        "Glossary authoring conflict. Reload the approved revision and merge "
+                        "your unsaved working copy.", status_code=HTTPStatus.CONFLICT
+                    )
+            parent = None if isinstance(current, DocumentGlossaryAuthoringBridgeDenied) else current.revision_id
+            try:
+                snapshot = build_owner_pinned_glossary_snapshot(
+                    source_language=form.get("source_language", ""), target_language=form.get("target_language", ""),
+                    source_terms=form.getlist("source_term"), target_terms=form.getlist("target_term"),
+                    entry_types=form.getlist("entry_type"),
+                )
+            except OwnerGlossaryEditorInputError:
+                return _html("Glossary editor input invalid", status_code=HTTPStatus.BAD_REQUEST)
+            if not hmac.compare_digest(
+                _selection_token(session, custody_id, purpose="parent", revision_id=parent or "no-parent"),
+                form.get("expected_parent_selection", ""),
+            ):
+                return _html(
+                    "Glossary authoring conflict. Reload the approved revision and merge "
+                    "your unsaved working copy.", status_code=HTTPStatus.CONFLICT
+                )
             result = author_document_glossary_revision(store=store, storage=storage, session=session, document_custody_id=custody_id, snapshot=snapshot, expected_parent_revision_id=parent)
         finally:
             store.close()
         if isinstance(result, DocumentGlossaryAuthoringBridgeDenied):
+            if result.code in {
+                "glossary_authoring_parent_not_current",
+                "glossary_authoring_duplicate_snapshot",
+                "glossary_authoring_locked",
+            }:
+                return _html(
+                    "Glossary authoring conflict. Reload the approved revision and merge "
+                    "your unsaved working copy.", status_code=HTTPStatus.CONFLICT
+                )
             return _html("Glossary revision unavailable", status_code=HTTPStatus.NOT_FOUND)
-        return RedirectResponse(_studio_location(result.document_custody_id), status_code=HTTPStatus.SEE_OTHER)
+        return RedirectResponse(_studio_location(form.get("document_selection", "")), status_code=HTTPStatus.SEE_OTHER)
 
     @router.post("/studio/lock", response_class=HTMLResponse)
     async def workbench_studio_lock(request: Request) -> Response:
@@ -511,15 +557,36 @@ def create_workbench_router(
         form = await _urlencoded_form(request)
         if not session_manager.verify_csrf(session, form.get("csrf_token")):
             return _html("Forbidden", status_code=HTTPStatus.FORBIDDEN)
-        custody_id = form.get("document_custody_id", "")
-        store, storage, _actor = _owner_store_and_storage(session)
+        if form.get("confirm_read_only") != "confirmed":
+            return _html("Glossary lock confirmation required", status_code=HTTPStatus.BAD_REQUEST)
+        store, storage, actor = _owner_store_and_storage(session)
         try:
+            selected, _entry = _selected_document_for_token(
+                store, storage, actor, session, form.get("document_selection", "")
+            )
+            if selected is None:
+                return _html("Glossary lock unavailable", status_code=HTTPStatus.NOT_FOUND)
+            custody_id = selected.document_custody_id
+            current = read_current_document_glossary_revision(
+                store=store, storage=storage, session=session,
+                document_custody_id=custody_id,
+            )
+            if isinstance(current, DocumentGlossaryAuthoringBridgeDenied):
+                return _html("Glossary lock unavailable", status_code=HTTPStatus.NOT_FOUND)
+            if not hmac.compare_digest(
+                _selection_token(session, custody_id, purpose="parent", revision_id=current.revision_id),
+                form.get("expected_revision_selection", ""),
+            ):
+                return _html(
+                    "Glossary authoring conflict. Reload the approved revision before "
+                    "making it read-only.", status_code=HTTPStatus.CONFLICT
+                )
             result = attest_document_glossary_lock(store=store, storage=storage, session=session, document_custody_id=custody_id)
         finally:
             store.close()
         if isinstance(result, DocumentGlossaryLockDenied):
             return _html("Glossary lock unavailable", status_code=HTTPStatus.NOT_FOUND)
-        return RedirectResponse(_studio_location(result.document_custody_id), status_code=HTTPStatus.SEE_OTHER)
+        return RedirectResponse(_studio_location(form.get("document_selection", "")), status_code=HTTPStatus.SEE_OTHER)
 
     @router.get("/select", response_class=HTMLResponse)
     async def workbench_select(request: Request) -> Response:
@@ -581,40 +648,27 @@ def create_workbench_router(
         if session is None:
             return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
         stage = request.query_params.get("stage") or "translate"
-        custody_id = request.query_params.get("document_custody_id", "")
+        selection = request.query_params.get("selection", "")
         if stage == "document-setup":
             if session.role is not AdminRole.OWNER:
                 return RedirectResponse("/admin/login", status_code=HTTPStatus.SEE_OTHER)
-            if not custody_id:
+            if not selection:
                 return _render_recovery(reason="unresolved-context")
             store, storage, actor = _owner_store_and_storage(session)
             try:
-                selected = select_owner_registered_original_docx_source(
-                    store=store, storage=storage, actor=actor,
-                    document_custody_id=custody_id,
+                selected, entry = _selected_document_for_token(
+                    store, storage, actor, session, selection
                 )
-                if isinstance(selected, DocumentIntakeDenied):
-                    return _render_recovery(reason="unresolved-context")
-                catalog = catalog_registered_original_docx_sources(
-                    store=store, storage=storage, actor=actor
-                )
-                entry = next(
-                    (
-                        item for item in catalog
-                        if item.document_custody_id == selected.document_custody_id
-                    ),
-                    None,
-                ) if not isinstance(catalog, DocumentIntakeDenied) else None
             finally:
                 store.close()
-            if entry is None:
+            if selected is None or entry is None:
                 return _render_recovery(reason="unresolved-context")
             return _html(
                 render_workbench_document_setup(
                     file_name=entry.file_name,
                     source_size_bytes=selected.source_size_bytes,
-                    glossary_href=_studio_location(selected.document_custody_id),
-                    document_setup_href=_setup_location(selected.document_custody_id),
+                    glossary_href=_studio_location(selection),
+                    document_setup_href=_setup_location(selection),
                 )
             )
         next_href = None

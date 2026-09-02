@@ -62,6 +62,24 @@ class DocumentGlossaryRevisionMetadata:
     outcome: str
 
 
+@dataclass(frozen=True)
+class DocumentGlossaryEditableRow:
+    """The only glossary-entry fields permitted in the owner editor."""
+
+    source_term: str
+    target_term: str
+    entry_type: str
+
+
+@dataclass(frozen=True)
+class DocumentGlossaryEditableProjection:
+    """Safe current-snapshot fields for a browser-local working copy."""
+
+    source_language: str
+    target_language: str
+    rows: tuple[DocumentGlossaryEditableRow, ...]
+
+
 def author_document_glossary_revision(
     *,
     store: object,
@@ -140,6 +158,63 @@ def read_current_document_glossary_revision(
                 )
             return _metadata(row, "current")
     return DocumentGlossaryAuthoringBridgeDenied("glossary_authoring_unsupported_backend")
+
+
+def read_current_document_glossary_editable_projection(
+    *,
+    store: object,
+    storage: LocalObjectStorage,
+    session: AdminSession,
+    document_custody_id: str,
+) -> DocumentGlossaryEditableProjection | DocumentGlossaryAuthoringBridgeDenied:
+    """Read only canonical fields after the normal owner/provenance checks."""
+    actor = _actor_from_session(session)
+    if isinstance(actor, DocumentGlossaryAuthoringBridgeDenied):
+        return actor
+    denial = _service_denial(store, storage, actor, document_custody_id)
+    if denial is not None:
+        return denial
+    if not isinstance(store, SQLiteTranslationJobStore):
+        return DocumentGlossaryAuthoringBridgeDenied(
+            "glossary_authoring_unsupported_backend"
+        )
+    revision = _sqlite_active_row(store._connection, document_custody_id)
+    if revision is None or not _revision_is_consistent(store._connection, revision):
+        return DocumentGlossaryAuthoringBridgeDenied(
+            "glossary_authoring_provenance_inconsistent"
+        )
+    row = store._connection.execute(
+        """SELECT snapshot_payload FROM glossary_snapshot_custody
+        WHERE custody_id = ? AND snapshot_digest = ?""",
+        (revision["snapshot_custody_id"], revision["snapshot_payload_sha256"]),
+    ).fetchone()
+    if row is None:
+        return DocumentGlossaryAuthoringBridgeDenied(
+            "glossary_authoring_provenance_inconsistent"
+        )
+    try:
+        snapshot = deserialize_glossary_snapshot_v1(bytes(row["snapshot_payload"]))
+        rows = tuple(
+            DocumentGlossaryEditableRow(
+                source_term=entry.source_canonical,
+                target_term=entry.target_canonical or "",
+                entry_type=str(entry.category),
+            )
+            for entry in snapshot.entries
+        )
+    except (GlossarySnapshotSerializationError, TypeError, ValueError):
+        return DocumentGlossaryAuthoringBridgeDenied(
+            "glossary_authoring_provenance_inconsistent"
+        )
+    if not rows or any(row.entry_type not in {"term", "name"} for row in rows):
+        return DocumentGlossaryAuthoringBridgeDenied(
+            "glossary_authoring_provenance_inconsistent"
+        )
+    return DocumentGlossaryEditableProjection(
+        source_language=snapshot.source_language,
+        target_language=snapshot.target_language,
+        rows=rows,
+    )
 
 
 def _actor_from_session(

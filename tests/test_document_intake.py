@@ -67,13 +67,11 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             follow_redirects=False,
         )
         catalog = client.get("/admin/workbench/")
-        custody = re.search(
-            r'name="document_custody_id" value="([^\"]+)"', catalog.text
-        )
-        assert custody is not None
+        selection = re.search(r'name="document_selection" value="([^\"]+)"', catalog.text)
+        assert selection is not None
         selected = client.post(
             "/admin/workbench/select",
-            data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)},
+            data={"csrf_token": csrf.group(1), "document_selection": selection.group(1)},
             follow_redirects=False,
         )
         self.assertTrue(
@@ -82,17 +80,19 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             )
         )
         setup = client.get(selected.headers["location"])
-        studio_location = re.search(
-            r'href="([^"]*/admin/workbench/studio\?document_custody_id=[^"]+)"',
-            setup.text,
-        )
+        studio_location = re.search(r'href="([^"]*/admin/workbench/studio\?selection=[^"]+)"', setup.text)
         assert studio_location is not None
         studio = client.get(studio_location.group(1))
-        parent = re.search(
-            r'name="expected_parent_revision_id" value="([^\"]+)"', studio.text
-        )
+        parent = re.search(r'name="expected_parent_selection" value="([^\"]+)"', studio.text)
         assert parent is not None
-        return client, database_path, storage_root, csrf.group(1), custody.group(1), parent.group(1), studio_location.group(1)
+        store = SQLiteTranslationJobStore(database_path)
+        try:
+            custody_id = store._connection.execute(
+                "SELECT document_custody_id FROM strict_docx_v3_document_custody"
+            ).fetchone()[0]
+        finally:
+            store.close()
+        return client, database_path, storage_root, csrf.group(1), custody_id, selection.group(1), parent.group(1), studio_location.group(1)
 
     def _workbench_glossary_counts(self, database_path: Path) -> tuple[int, int]:
         store = SQLiteTranslationJobStore(database_path)
@@ -107,8 +107,43 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         finally:
             store.close()
 
+    def _workbench_authoring_counts(self, database_path: Path) -> dict[str, int]:
+        tables = (
+            "document_glossary_revisions",
+            "glossary_approvals",
+            "glossary_snapshot_custody",
+            "strict_docx_v3_document_custody",
+            "document_glossary_revision_events",
+        )
+        store = SQLiteTranslationJobStore(database_path)
+        try:
+            return {
+                table: store._connection.execute(
+                    f"SELECT COUNT(*) FROM {table}"
+                ).fetchone()[0]
+                for table in tables
+            }
+        finally:
+            store.close()
+
+    def _workbench_raw_values(self, database_path: Path) -> tuple[str, ...]:
+        store = SQLiteTranslationJobStore(database_path)
+        try:
+            row = store._connection.execute(
+                """SELECT custody.document_custody_id, custody.source_object_key,
+                revision.revision_id, revision.approval_id, revision.snapshot_custody_id,
+                revision.snapshot_payload_sha256
+                FROM strict_docx_v3_document_custody custody
+                JOIN document_glossary_revisions revision
+                  ON revision.document_custody_id = custody.document_custody_id""",
+            ).fetchone()
+        finally:
+            store.close()
+        assert row is not None
+        return tuple(row)
+
     def test_workbench_studio_save_rejects_bad_csrf_without_durable_revision(self) -> None:
-        client, database_path, _, _, custody_id, parent, _ = self._workbench_studio_context()
+        client, database_path, _, _, _custody_id, selection, parent, _ = self._workbench_studio_context()
         submitted_source = "synthetic-csrf-source"
         submitted_target = "synthetic-csrf-target"
 
@@ -116,8 +151,8 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             "/admin/workbench/studio/save",
             data={
                 "csrf_token": "invalid-csrf",
-                "document_custody_id": custody_id,
-                "expected_parent_revision_id": parent,
+                "document_selection": selection,
+                "expected_parent_selection": parent,
                 "source_language": "en",
                 "target_language": "ru",
                 "source_term": submitted_source,
@@ -133,7 +168,23 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         self.assertEqual(self._workbench_glossary_counts(database_path), (0, 0))
 
     def test_workbench_studio_save_rejects_unknown_and_foreign_custody_without_write(self) -> None:
-        client, database_path, _, csrf, custody_id, parent, _ = self._workbench_studio_context()
+        client, database_path, _, csrf, custody_id, selection, parent, _ = self._workbench_studio_context()
+        created = client.post(
+            "/admin/workbench/studio/save",
+            data={
+                "csrf_token": csrf,
+                "document_selection": selection,
+                "expected_parent_selection": parent,
+                "source_language": "en",
+                "target_language": "ru",
+                "source_term": "synthetic-denial-setup-source",
+                "target_term": "synthetic-denial-setup-target",
+                "entry_type": "term",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(created.status_code, 303)
+        raw_values = self._workbench_raw_values(database_path)
         foreign_store = SQLiteTranslationJobStore(database_path)
         try:
             foreign_store._connection.execute(
@@ -145,35 +196,41 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             foreign_store._connection.commit()
         finally:
             foreign_store.close()
-        for denied_custody_id in ("unknown-route-cover-custody", custody_id):
-            with self.subTest(custody_id=denied_custody_id):
+        for case, denied_selection in (
+            ("unknown", "unknown-route-cover-selection"),
+            ("foreign", selection),
+        ):
+            with self.subTest(selection=denied_selection):
+                submitted_source = f"synthetic-denied-{case}-source"
+                submitted_target = f"synthetic-denied-{case}-target"
                 response = client.post(
                     "/admin/workbench/studio/save",
                     data={
                         "csrf_token": csrf,
-                        "document_custody_id": denied_custody_id,
-                        "expected_parent_revision_id": parent,
+                        "document_selection": denied_selection,
+                        "expected_parent_selection": parent,
                         "source_language": "en",
                         "target_language": "ru",
-                        "source_term": "synthetic-denied-source",
-                        "target_term": "synthetic-denied-target",
+                        "source_term": submitted_source,
+                        "target_term": submitted_target,
                         "entry_type": "term",
                     },
                     follow_redirects=False,
                 )
                 self.assertEqual(response.status_code, 404)
-                self.assertNotIn("synthetic-denied-source", response.text)
-                self.assertNotIn("synthetic-denied-target", response.text)
-                self.assertEqual(self._workbench_glossary_counts(database_path), (0, 0))
+                for value in (*raw_values, submitted_source, submitted_target):
+                    self.assertNotIn(value, response.text)
+                    self.assertNotIn(value, response.headers.get("location", ""))
+                self.assertEqual(self._workbench_glossary_counts(database_path), (1, 1))
 
     def test_workbench_studio_save_prg_and_stale_parent_do_not_create_successor(self) -> None:
-        client, database_path, _, csrf, custody_id, parent, studio_location = self._workbench_studio_context()
+        client, database_path, _, csrf, _custody_id, selection, parent, studio_location = self._workbench_studio_context()
         created = client.post(
             "/admin/workbench/studio/save",
             data={
                 "csrf_token": csrf,
-                "document_custody_id": custody_id,
-                "expected_parent_revision_id": parent,
+                "document_selection": selection,
+                "expected_parent_selection": parent,
                 "source_language": "en",
                 "target_language": "ru",
                 "source_term": "synthetic-first-source",
@@ -191,8 +248,8 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             "/admin/workbench/studio/save",
             data={
                 "csrf_token": csrf,
-                "document_custody_id": custody_id,
-                "expected_parent_revision_id": parent,
+                "document_selection": selection,
+                "expected_parent_selection": parent,
                 "source_language": "en",
                 "target_language": "ru",
                 "source_term": "synthetic-stale-source",
@@ -202,7 +259,8 @@ class DocumentIntakeServiceTest(unittest.TestCase):
             follow_redirects=False,
         )
 
-        self.assertEqual(stale.status_code, 404)
+        self.assertEqual(stale.status_code, 409)
+        self.assertIn("Reload the approved revision and merge", stale.text)
         self.assertNotIn("synthetic-stale-source", stale.text)
         self.assertNotIn("synthetic-stale-target", stale.text)
         self.assertEqual(self._workbench_glossary_counts(database_path), (1, 1))
@@ -873,9 +931,10 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         uploaded = client.post("/admin/workbench/upload", data={"csrf_token": csrf.group(1)}, files={"file": ("book.docx", _docx_bytes(), "application/octet-stream")}, follow_redirects=False)
         self.assertEqual(uploaded.headers["location"], "/admin/workbench/")
         catalog = client.get(uploaded.headers["location"])
-        custody = re.search(r'name="document_custody_id" value="([^"]+)"', catalog.text)
-        assert custody is not None
-        selected = client.post("/admin/workbench/select", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)}, follow_redirects=False)
+        selection = re.search(r'name="document_selection" value="([^"]+)"', catalog.text)
+        assert selection is not None
+        self.assertNotIn("document_custody_id", catalog.text)
+        selected = client.post("/admin/workbench/select", data={"csrf_token": csrf.group(1), "document_selection": selection.group(1)}, follow_redirects=False)
         self.assertTrue(selected.headers["location"].startswith("/admin/workbench/future?stage=document-setup&"))
         setup = client.get(selected.headers["location"])
         self.assertIn("Review this document, then continue to its glossary.", setup.text)
@@ -888,10 +947,10 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         self.assertEqual(setup_nav.group(1).replace("&amp;", "&"), selected.headers["location"])
         selected_setup = client.get(setup_nav.group(1).replace("&amp;", "&"))
         self.assertEqual(selected_setup.status_code, 200)
-        studio_location = re.search(r'href="([^"]*/admin/workbench/studio\?document_custody_id=[^"]+)"', setup.text)
+        studio_location = re.search(r'href="([^"]*/admin/workbench/studio\?selection=[^"]+)"', setup.text)
         assert studio_location is not None
         selected_setup_studio_location = re.search(
-            r'href="([^"]*/admin/workbench/studio\?document_custody_id=[^"]+)"',
+            r'href="([^"]*/admin/workbench/studio\?selection=[^"]+)"',
             selected_setup.text,
         )
         assert selected_setup_studio_location is not None
@@ -901,10 +960,10 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         setup_visible_text = re.sub(r"<[^>]+>", "", setup_main.group(1))
         self.assertNotIn("Document Studio", setup_visible_text)
         self.assertNotIn("document_custody_id", setup_visible_text)
-        self.assertNotIn(custody.group(1), setup_visible_text)
+        self.assertNotIn("document_custody_id", setup.text)
         tampered_setup = client.get(
             "/admin/workbench/future?stage=document-setup&"
-            "document_custody_id=tampered-workbench-selection"
+            "selection=tampered-workbench-selection"
         )
         self.assertEqual(tampered_setup.status_code, 200)
         self.assertNotIn("tampered-workbench-selection", tampered_setup.text)
@@ -916,9 +975,11 @@ class DocumentIntakeServiceTest(unittest.TestCase):
         self.assertNotIn("Admin Console", studio.text)
         self.assertIn('id="add-glossary-row"', studio.text)
         self.assertIn("appendChild(row)", studio.text)
-        parent = re.search(r'name="expected_parent_revision_id" value="([^"]+)"', studio.text)
+        parent = re.search(r'name="expected_parent_selection" value="([^"]+)"', studio.text)
         assert parent is not None
-        created = client.post("/admin/workbench/studio/save", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1), "expected_parent_revision_id": parent.group(1), "source_language": "en", "target_language": "ru", "source_term": ["Term", "Second"], "target_term": ["Термин", "Второй"], "entry_type": ["term", "name"]}, follow_redirects=False)
+        submitted_sources = ["Private-success-source-one", "Private-success-source-two"]
+        submitted_targets = ["Private-success-target-one", "Private-success-target-two"]
+        created = client.post("/admin/workbench/studio/save", data={"csrf_token": csrf.group(1), "document_selection": selection.group(1), "expected_parent_selection": parent.group(1), "source_language": "en", "target_language": "ru", "source_term": submitted_sources, "target_term": submitted_targets, "entry_type": ["term", "name"]}, follow_redirects=False)
         self.assertEqual(created.headers["location"], studio_location.group(1))
         store = SQLiteTranslationJobStore(root / "workbench-jobs.sqlite3")
         try:
@@ -926,47 +987,70 @@ class DocumentIntakeServiceTest(unittest.TestCase):
                 """SELECT snapshot.snapshot_payload FROM document_glossary_revisions revision
                 JOIN glossary_snapshot_custody snapshot
                   ON snapshot.custody_id = revision.snapshot_custody_id
-                WHERE revision.document_custody_id = ?""",
-                (custody.group(1),),
+                """,
             ).fetchone()[0]
         finally:
             store.close()
+        raw_values = self._workbench_raw_values(root / "workbench-jobs.sqlite3")
+        for value in (*raw_values, *submitted_sources, *submitted_targets):
+            self.assertNotIn(value, created.text)
+            self.assertNotIn(value, created.headers.get("location", ""))
         saved_snapshot = deserialize_glossary_snapshot_v1(bytes(payload))
         self.assertEqual(len(saved_snapshot.entries), 2)
         self.assertEqual(
             {entry.category for entry in saved_snapshot.entries}, {"term", "name"}
         )
-        locked = client.post("/admin/workbench/studio/lock", data={"csrf_token": csrf.group(1), "document_custody_id": custody.group(1)}, follow_redirects=False)
+        saved_studio = client.get(created.headers["location"])
+        revision = re.search(
+            r'name="expected_parent_selection" value="([^\"]+)"', saved_studio.text
+        )
+        assert revision is not None
+        self.assertIn("Approved revision 1 — editable authoring record only; not used by translation in this slice.", saved_studio.text)
+        self.assertIn(
+            "Private-success-source-one → Private-success-target-one (term)",
+            saved_studio.text,
+        )
+        unconfirmed = client.post("/admin/workbench/studio/lock", data={"csrf_token": csrf.group(1), "document_selection": selection.group(1), "expected_revision_selection": revision.group(1)}, follow_redirects=False)
+        self.assertEqual(unconfirmed.status_code, 400)
+        self.assertIn("confirmation required", unconfirmed.text)
+        for raw_value in raw_values:
+            self.assertNotIn(raw_value, unconfirmed.text)
+            self.assertNotIn(raw_value, unconfirmed.headers.get("location", ""))
+        locked = client.post("/admin/workbench/studio/lock", data={"csrf_token": csrf.group(1), "document_selection": selection.group(1), "expected_revision_selection": revision.group(1), "confirm_read_only": "confirmed"}, follow_redirects=False)
         self.assertEqual(locked.headers["location"], studio_location.group(1))
         locked_studio = client.get(locked.headers["location"])
-        self.assertIn("This glossary is read-only.", locked_studio.text)
+        self.assertIn("Locked revision 1 — read-only authoring record only; not used by translation in this slice.", locked_studio.text)
         self.assertNotIn("lock state", locked_studio.text)
         self.assertIn("disabled", locked_studio.text)
+        counts_before_locked_save = self._workbench_authoring_counts(
+            root / "workbench-jobs.sqlite3"
+        )
+        submitted_source = "Third-private-submitted-term"
+        submitted_target = "Третий-private-submitted-term"
         locked_save = client.post(
             "/admin/workbench/studio/save",
             data={
                 "csrf_token": csrf.group(1),
-                "document_custody_id": custody.group(1),
-                "expected_parent_revision_id": parent.group(1),
-                "source_language": "en",
+                "document_selection": selection.group(1),
+                "expected_parent_selection": parent.group(1),
+                "source_language": "",
                 "target_language": "ru",
-                "source_term": "Third",
-                "target_term": "Третий",
+                "source_term": submitted_source,
+                "target_term": submitted_target,
                 "entry_type": "term",
             },
             follow_redirects=False,
         )
-        self.assertEqual(locked_save.status_code, 404)
-        store = SQLiteTranslationJobStore(root / "workbench-jobs.sqlite3")
-        try:
-            self.assertEqual(
-                store._connection.execute(
-                    "SELECT COUNT(*) FROM document_glossary_revisions"
-                ).fetchone()[0],
-                1,
-            )
-        finally:
-            store.close()
+        self.assertEqual(locked_save.status_code, 409)
+        self.assertIn("Reload the approved revision and merge", locked_save.text)
+        self.assertNotIn("Glossary editor input invalid", locked_save.text)
+        for raw_value in (*raw_values, submitted_source, submitted_target):
+            self.assertNotIn(raw_value, locked_save.text)
+            self.assertNotIn(raw_value, locked_save.headers.get("location", ""))
+        self.assertEqual(
+            self._workbench_authoring_counts(root / "workbench-jobs.sqlite3"),
+            counts_before_locked_save,
+        )
 
     def test_bounded_request_body_rejects_chunked_oversize_before_multipart_parse(
         self,
