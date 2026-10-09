@@ -375,7 +375,7 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             )
 
     def test_issue_559_real_epub_boundary_runs_fake_pair_with_approved_fixture(self):
-        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+        fixture = Path("test_samples/synthetic_glossary_control.en.epub")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             report_path = tmp_path / "issue-559-report.md"
@@ -434,7 +434,7 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
             self.assertNotIn("provider_response", rendered)
 
     def test_issue_559_boundary_rejects_unapproved_targets_and_extra_calls(self):
-        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+        fixture = Path("test_samples/synthetic_glossary_control.en.epub")
         with patch(
             "tools.glossary_runtime_provider_smoke.ISSUE_559_INPUT_TARGETS",
             ((fixture, "ru"),),
@@ -1616,7 +1616,7 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
         self.assertNotIn("<glossary_context", serialized)
 
     def test_control_epub_target_metadata_fixture_enables_ru_uk_rehearsal(self):
-        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+        fixture = Path("test_samples/synthetic_glossary_control.en.epub")
         target_strings = {
             "ru": (
                 "\u0442\u0440\u0438 "
@@ -1787,7 +1787,7 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
                 self.assertNotIn("Дзеркальний Торг", serialized)
 
     def test_control_epub_missing_target_metadata_fixture_falls_back_safely(self):
-        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+        fixture = Path("test_samples/synthetic_glossary_control.en.epub")
 
         with self.assertRaises(RuntimePackageSelectionError) as raised:
             build_runtime_package(
@@ -1820,7 +1820,7 @@ class GlossaryRuntimeProviderSmokeTest(unittest.TestCase):
         self.assertNotIn("<translation_batch>", serialized)
 
     def test_control_epub_invalid_target_fixture_raw_field_is_rejected(self):
-        fixture = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+        fixture = Path("test_samples/synthetic_glossary_control.en.epub")
         with tempfile.TemporaryDirectory() as tmp:
             fixture_path = Path(tmp) / "invalid-target-fixture.json"
             fixture_path.write_text(

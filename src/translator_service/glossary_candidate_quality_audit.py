@@ -117,23 +117,23 @@ def default_candidate_quality_audit_cases() -> tuple[
             input_id="ukrainian_profile_regression_txt_uk",
         ),
         PreparedGlossaryCandidateQualityAuditCase(
-            input_path=Path("test_samples/gutenberg_time_machine_noimages.en.epub"),
+            input_path=Path("test_samples/synthetic_glossary_control.en.epub"),
             document_kind="epub",
             target_language="ru",
-            input_id="gutenberg_time_machine_epub_ru",
+            input_id="synthetic_glossary_control_epub_ru",
             target_metadata_path=Path(
                 "test_samples/glossary_targets/"
-                "gutenberg_time_machine_noimages.runtime-glossary-targets.json"
+                "synthetic_glossary_control.runtime-glossary-targets.json"
             ),
         ),
         PreparedGlossaryCandidateQualityAuditCase(
-            input_path=Path("test_samples/gutenberg_time_machine_noimages.en.epub"),
+            input_path=Path("test_samples/synthetic_glossary_control.en.epub"),
             document_kind="epub",
             target_language="uk",
-            input_id="gutenberg_time_machine_epub_uk",
+            input_id="synthetic_glossary_control_epub_uk",
             target_metadata_path=Path(
                 "test_samples/glossary_targets/"
-                "gutenberg_time_machine_noimages.runtime-glossary-targets.json"
+                "synthetic_glossary_control.runtime-glossary-targets.json"
             ),
         ),
     )

@@ -1,7 +1,7 @@
 # Gate 1B PostgreSQL migration-first reconciliation (Slice M0)
 
 **Date:** 2026-07-24
-**Source-pinned baseline:** `d9b55563f675e9da1393191daa2afe31a25d0c83` (`test(gate1b): verify durable binding boundaries (#837)`)
+**Source-pinned baseline:** `075117788527526b355bbab27518a23473250613` (`test(gate1b): verify durable binding boundaries (#837)`)
 **Task type:** docs-only / spike-discovery.
 **Risk level:** high for follow-on schema/state work; this reconciliation itself is local metadata-only and makes no code, database, provider, deploy, PR, or merge change.
 **Approval status:** approved only for this no-runtime M0 reconciliation. The existing owner-approved bounded implementation scope is the versioned migration route in the attached planning packet; migration implementation remains separately gated by the approved scope and its acceptance criteria.

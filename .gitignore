@@ -18,3 +18,12 @@ outputs/
 .superpowers/
 epub_audit_output/
 private_fixtures/
+
+# Private developer material kept outside public source history
+AGENTS.md
+.agents/
+handoff/
+docs/HANDOFF.md
+docs/archive/
+docs/competitive/
+artifacts/admin-audit-*/

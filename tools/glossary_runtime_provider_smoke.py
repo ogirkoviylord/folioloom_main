@@ -180,7 +180,7 @@ LANGUAGE_POLICY_PACKAGE_FIXTURES = (
 )
 DEFAULT_TARGET_METADATA_FIXTURE_PATH = Path(
     "test_samples/glossary_targets/"
-    "gutenberg_time_machine_noimages.runtime-glossary-targets.json"
+    "synthetic_glossary_control.runtime-glossary-targets.json"
 )
 APPROVED_INPUT_TARGETS = (
     (Path("test_samples/russian_profile_regression.en-ru.txt"), "ru"),
@@ -190,8 +190,8 @@ APPROVED_INPUT_TARGETS = (
     (Path("private_fixtures/pg78824-images-3.epub"), "uk"),
 )
 APPROVED_OWNER_TEST_INPUT_TARGETS = (
-    (Path("test_samples/gutenberg_time_machine_noimages.en.epub"), "ru"),
-    (Path("test_samples/gutenberg_time_machine_noimages.en.epub"), "uk"),
+    (Path("test_samples/synthetic_glossary_control.en.epub"), "ru"),
+    (Path("test_samples/synthetic_glossary_control.en.epub"), "uk"),
 )
 TARGET_METADATA_FIXTURE_MAX_ENTRIES_PER_TARGET = 16
 TARGET_METADATA_FIXTURE_MAX_ALIASES = 8

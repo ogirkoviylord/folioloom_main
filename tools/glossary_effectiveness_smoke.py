@@ -55,7 +55,7 @@ from translator_service.worker import (
 
 ISSUE_ID = "675"
 SCHEMA_VERSION = "glossary-effectiveness-smoke-v1"
-APPROVED_INPUT = Path("test_samples/gutenberg_time_machine_noimages.en.epub")
+APPROVED_INPUT = Path("test_samples/synthetic_glossary_control.en.epub")
 APPROVED_TARGET = "ru"
 APPROVED_DIAGNOSTIC_ROOT = Path("outputs/issue-675-glossary-effectiveness-smoke")
 DEFAULT_PROVIDER_BASE_URL = "https://api.deepseek.com"

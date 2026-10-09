@@ -94,10 +94,10 @@ def default_runtime_effectiveness_audit_cases() -> tuple[
             input_id="sample_book_txt_ru",
         ),
         RuntimeEffectivenessAuditCase(
-            input_path=Path("test_samples/gutenberg_time_machine_noimages.en.epub"),
+            input_path=Path("test_samples/synthetic_glossary_control.en.epub"),
             document_kind=DocumentFormat.EPUB.value,
             target_language="ru",
-            input_id="gutenberg_time_machine_epub_ru",
+            input_id="synthetic_glossary_control_epub_ru",
         ),
     )
 

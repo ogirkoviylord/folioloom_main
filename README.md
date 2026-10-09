@@ -366,6 +366,6 @@ projects.
 This repository contains the FolioLoom implementation, tests and engineering
 design history. Internal developer instructions, personal deployment records
 and unverified external document packs are excluded from the public candidate.
-See `test_samples/rights-manifest.json` for third-party fixture provenance and
-remaining publication review. No project source-code license has been selected
+See `test_samples/rights-manifest.json` for the provenance of committed
+synthetic material. Full external books remain outside source history. No project source-code license has been selected
 yet; repository visibility is not a blanket license for third-party material.

@@ -590,12 +590,12 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
 
     def test_candidate_quality_backfills_from_reducer_diagnostics_after_drops(self):
         content = Path(
-            "test_samples/gutenberg_time_machine_noimages.en.epub"
+            "test_samples/synthetic_glossary_control.en.epub"
         ).read_bytes()
         target_payload = json.loads(
             Path(
                 "test_samples/glossary_targets/"
-                "gutenberg_time_machine_noimages.runtime-glossary-targets.json"
+                "synthetic_glossary_control.runtime-glossary-targets.json"
             ).read_text(encoding="utf-8")
         )
         expected_terms = {
@@ -604,7 +604,7 @@ class PreparedGlossaryPrepServiceTests(unittest.TestCase):
         }
         request = PreparedGlossaryPackagePrepRequest(
             user_telegram_id=42,
-            file_name="gutenberg_time_machine_noimages.en.epub",
+            file_name="synthetic_glossary_control.en.epub",
             document_kind="epub",
             source_language="en",
             target_language="ru",
