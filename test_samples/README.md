@@ -1,92 +1,38 @@
-# Test Samples
+# Test samples
 
-This directory contains repository fixtures for local tests, tools, and
-owner-approved development checks.
+## Repository-generated fixtures
 
-## Real-book EPUB fixture
+`sample_book.*`, Russian/Ukrainian profile regression samples and the adversarial
+glossary TXT/JSON fixtures are repository-generated test material. See
+`scripts/generate_sample_documents.py` and the related regression modules.
+The stress-test DOCX is a synthetic structural fixture.
 
-The `pg78824-images-3` EPUB fixture was added from an owner-supplied local EPUB
-on 2026-06-12.
+## Project Gutenberg source fixtures
 
-Files:
+`pg78824-images-3.en-ru.epub` and `pg78824-images-3.en-uk.epub` both contain the
+English source of *Girls together* by Amy Ella Blanchard. The suffixes identify
+target-language checks; they do not indicate translated book contents.
 
-- `pg78824-images-3.en-ru.epub` - English source EPUB for Russian-target checks.
-- `pg78824-images-3.en-uk.epub` - English source EPUB for Ukrainian-target checks.
+The official catalog is https://www.gutenberg.org/ebooks/78824. The EPUB embeds
+https://www.gutenberg.org/files/78824/78824-h/78824-h.htm as its source and a US
+public-domain rights statement. This metadata provides source evidence beyond
+the original local-file confirmation. Exact upstream byte identity has not been
+independently established.
 
-Metadata confirmed locally:
+`gutenberg_time_machine_noimages.en.epub` is the English control source for
+*The Time Machine* by H. G. Wells, catalog https://www.gutenberg.org/ebooks/35.
 
-- EPUB title metadata: `Girls together`
-- EPUB creator metadata: `Amy Ella Blanchard`
-- EPUB language metadata: `en`
-- SHA-256: `318d2689b85dc57ae1e91307acebe3b61bf717ef72070aa0566f7f99b880d5a3`
+Checksums, source metadata and the remaining jurisdiction review are recorded
+in `rights-manifest.json`. The Project Gutenberg license remains inside the
+EPUBs. Its terms and rights outside the USA must be checked before distribution:
+https://www.gutenberg.org/policy/license.html. A future source-code license does
+not replace the separate conditions of these third-party books.
 
-Repository evidence for the original source URL or final license text is
-`Unknown`; the committed fixture relies on the owner rights/permissive-use
-confirmation above.
+## Private external fixtures
 
-## Gutenberg no-images EPUB control fixture
+Unverified third-party DOCX packs and translated EPUB artifacts are excluded
+from the candidate public source history. Optional personally supplied files
+belong in untracked `private_fixtures/`, not in the repository.
 
-The `gutenberg_time_machine_noimages` EPUB fixture was added from Project
-Gutenberg as a small, text-heavy no-images EPUB control for EPUB glossary
-runtime pressure checks.
-
-Files:
-
-- `gutenberg_time_machine_noimages.en.epub` - English source EPUB control for
-  Russian/Ukrainian EPUB glossary runtime pressure and fake paired rehearsal
-  checks.
-
-Source metadata confirmed from Project Gutenberg on 2026-06-13:
-
-- Project Gutenberg eBook No.: `35`
-- Title: `The Time Machine`
-- Author: `H. G. Wells`
-- Language: `English`
-- Category: `Text`
-- Landing page: `https://www.gutenberg.org/ebooks/35`
-- Download used: `https://www.gutenberg.org/ebooks/35.epub.noimages`
-- Rights evidence: Project Gutenberg landing page says `Public domain in the
-  USA`.
-- SHA-256:
-  `683bc9a24c75cece891dad50ed4b5cea1373a6ea2783863342dec2493adb1dc7`
-
-Local metadata-only control result on 2026-06-13:
-
-- Mode: local fake, no provider calls.
-- Targets checked: `ru`, `uk`.
-- Selected runtime unit: 12 source blocks, 816 source characters and 13
-  protected markers.
-- Fake paired glossary-on/glossary-off rehearsal status: validated for both
-  targets.
-- Quality claim: `Unknown`; fake output is not translation-quality evidence.
-
-Do not copy raw excerpts, prompts, provider responses, translated text, or
-diagnostic payloads from these fixtures into ordinary logs, GitHub issues, PR
-descriptions, docs, release artifacts, support artifacts, or user-facing/admin
-surfaces. Live provider use requires a separate explicit bounded approval.
-
-## Synthetic adversarial glossary fixture
-
-The `glossary_adversarial_terms` TXT fixture is a synthetic, owner-requested
-control sample for glossary benefit checks. It uses invented English names that
-look like ordinary phrases, with synthetic Russian and Ukrainian target
-metadata that intentionally does not follow the plain literal translation.
-
-Files:
-
-- `glossary_adversarial_terms.en.txt` - English synthetic source fixture.
-- `glossary_targets/glossary_adversarial_terms.runtime-glossary-targets.json` -
-  owner-requested synthetic target metadata for Russian and Ukrainian
-  local/fake glossary checks.
-
-Purpose:
-
-- local/fake glossary-on selection and prompt-context checks;
-- future bounded live glossary-on/off provider smoke only after separate owner
-  approval;
-- no semantic-quality or rollout claim by itself.
-
-Do not copy raw fixture excerpts, prompts, provider responses, translated text,
-or diagnostic payloads into ordinary logs, GitHub issues, PR descriptions,
-docs, release artifacts, support artifacts, or user-facing/admin surfaces.
-Live provider use requires a separate explicit bounded approval.
+Tests are local/fake. Provider-backed tools require deliberate configuration;
+fixtures and successful structural tests are not translation-quality evidence.

@@ -330,3 +330,12 @@ See `docs/CAT_WORKFLOW_GATES.md` for the canonical strategy and `docs/restart/re
 This project is implemented from scratch. Do not copy AGPL code, prompts, file
 structure, class/function names, tests, or implementation details from AGPL
 projects.
+
+## Repository content
+
+This repository contains the FolioLoom implementation, tests and engineering
+design history. Internal developer instructions, personal deployment records
+and unverified external document packs are excluded from the public candidate.
+See `test_samples/rights-manifest.json` for third-party fixture provenance and
+remaining publication review. No project source-code license has been selected
+yet; repository visibility is not a blanket license for third-party material.

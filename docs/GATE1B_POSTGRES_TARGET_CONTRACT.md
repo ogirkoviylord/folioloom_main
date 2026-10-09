@@ -1,7 +1,7 @@
 # Gate 1B PostgreSQL-target strict DOCX authorization contract
 
 **Date:** 2026-07-24
-**Source-pinned baseline:** `19dc0455e4c9a05af564c0191fac977b40bf11df` (`test(gate1b): verify durable binding boundaries (#837)`)
+**Source-pinned baseline:** `d9b55563f675e9da1393191daa2afe31a25d0c83` (`test(gate1b): verify durable binding boundaries (#837)`)
 **Status:** Approved bounded target contract and delivery route. It is not PostgreSQL implementation, migration, runtime activation, Gate 1 closure, quality, beta, release, or deployment evidence.
 
 ## Purpose

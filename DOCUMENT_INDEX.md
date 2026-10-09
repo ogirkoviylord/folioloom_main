@@ -1,7 +1,7 @@
 # Document Index
 
 
-## Bootstrap Docs
+## Current state and verification
 
 - `CURRENT_PROJECT_STATE.md` - compact factual project state and gaps.
 - `docs/QUALITY_GATES.md` - verification commands and gates.
@@ -11,8 +11,8 @@
 - `README.md` - main repository entry point and commands.
 - `README.project.md` - project overview.
 - `docs/CAT_WORKFLOW_GATES.md` - canonical CAT-like author workflow gate model; start here for strategy/release questions.
-- `docs/GATE1_GLOSSARY_SOURCE_SEAM_AUDIT.md` - source-backed source seam audit and conditional next technical rehearsal for manual glossary control.
-- `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md` - current multi-model synthesis: reusable glossary core, authority boundary and completed local snapshot-lock sequence through #836.
+- `docs/GATE1_GLOSSARY_SOURCE_SEAM_AUDIT.md` - source-backed seam audit and conditional next technical rehearsal for manual glossary control.
+- `docs/GLOSSARY_WORKBENCH_COUNCIL_SYNTHESIS.md` - current architecture synthesis: reusable glossary core, authority boundary and completed local snapshot-lock sequence through #836.
 - `docs/GATE1B_STRICT_DOCX_DURABLE_AUTHORIZATION_SPIKE.md` - design/readiness packet for the next strict-DOCX durable-binding reconciliation; not implementation approval.
 - `docs/GATE1B_STRICT_DOCX_DURABLE_AUTHORIZATION_RECONCILIATION.md` - source-pinned current-main reconciliation merged through #837; records the SQLite-only baseline and unresolved implementation evidence.
 - `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md` - approved target contract and bounded delivery route: PostgreSQL durable/runtime target, SQLite local/reference implementation; not PostgreSQL implementation or activation evidence.

@@ -161,7 +161,7 @@ assembly/openability paths.
 Environment:
 
 - branch: `codex/issue-75-real-file-matrix`
-- commit: `08ab21bab5db2987e4297c57c4685d94272eade1`
+- commit: `5d58ec234c7d55238c9cadea64689027fe82047d`
 - scope: local temp-only run; no real `.env*`, no `var/`, no server/runtime
   data, no private/user data, no online validators, no committed raw artifacts
 - tools: local project upload/content validators, persistent planner/assembly,

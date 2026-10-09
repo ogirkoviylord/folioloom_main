@@ -1,7 +1,7 @@
 # Gate 1B strict DOCX durable authorization: source-pinned baseline
 
 **Date:** 2026-07-24
-**Source-pinned baseline verified:** `19dc0455e4c9a05af564c0191fac977b40bf11df` (`test(gate1b): verify durable binding boundaries (#837)`).
+**Source-pinned baseline verified:** `d9b55563f675e9da1393191daa2afe31a25d0c83` (`test(gate1b): verify durable binding boundaries (#837)`).
 **Task type:** spike/discovery and docs-only.
 **Risk level:** high for any follow-on: persistent database state, scheduler claim semantics, worker/provider admission, and backend parity.
 **Approval status:** this reconciliation changes no production code, state, provider configuration, PR, or merge. The approved bounded implementation route is recorded in `docs/GATE1B_POSTGRES_TARGET_CONTRACT.md`. The earlier readiness spike remains a design packet and was not, by itself, approval to change database/state or runtime behavior (`docs/GATE1B_STRICT_DOCX_DURABLE_AUTHORIZATION_SPIKE.md:21,27,301`). The approved route does not prove or independently approve PostgreSQL implementation, a migration, runtime activation, rollout, Gate 1 closure, beta, release, or quality outcome.

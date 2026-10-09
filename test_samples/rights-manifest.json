@@ -1,0 +1,32 @@
+[
+  {
+    "file": "pg78824-images-3.en-ru.epub",
+    "title": "Girls together",
+    "catalog": "https://www.gutenberg.org/ebooks/78824",
+    "embedded_source": "https://www.gutenberg.org/files/78824/78824-h/78824-h.htm",
+    "sha256": "318d2689b85dc57ae1e91307acebe3b61bf717ef72070aa0566f7f99b880d5a3",
+    "rights_evidence": "Public domain in the USA, per embedded metadata and official catalog",
+    "license": "Project Gutenberg license retained inside EPUB; https://www.gutenberg.org/policy/license.html",
+    "publication_jurisdiction_review": "Pending; US catalog status is not a worldwide clearance"
+  },
+  {
+    "file": "pg78824-images-3.en-uk.epub",
+    "title": "Girls together",
+    "catalog": "https://www.gutenberg.org/ebooks/78824",
+    "embedded_source": "https://www.gutenberg.org/files/78824/78824-h/78824-h.htm",
+    "sha256": "318d2689b85dc57ae1e91307acebe3b61bf717ef72070aa0566f7f99b880d5a3",
+    "rights_evidence": "Public domain in the USA, per embedded metadata and official catalog",
+    "license": "Project Gutenberg license retained inside EPUB; https://www.gutenberg.org/policy/license.html",
+    "publication_jurisdiction_review": "Pending; US catalog status is not a worldwide clearance"
+  },
+  {
+    "file": "gutenberg_time_machine_noimages.en.epub",
+    "title": "The Time Machine",
+    "catalog": "https://www.gutenberg.org/ebooks/35",
+    "embedded_source": "https://www.gutenberg.org/files/35/35-h/35-h.htm",
+    "sha256": "683bc9a24c75cece891dad50ed4b5cea1373a6ea2783863342dec2493adb1dc7",
+    "rights_evidence": "Public domain in the USA, per embedded metadata and official catalog",
+    "license": "Project Gutenberg license retained inside EPUB; https://www.gutenberg.org/policy/license.html",
+    "publication_jurisdiction_review": "Pending; US catalog status is not a worldwide clearance"
+  }
+]
