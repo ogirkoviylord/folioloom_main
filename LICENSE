@@ -1,0 +1,84 @@
+FolioLoom Source Inspection License
+Version 1.0
+
+Copyright (c) 2026 Yurii Medvediev.
+All rights reserved except as expressly permitted below.
+Other authors retain rights in their respective contributions.
+
+1. Scope and ownership
+
+These terms apply to the original FolioLoom source code, documentation, tests,
+synthetic fixtures and project-created images in this repository (the
+"Materials"), only to the extent that Yurii Medvediev (the "Licensor") owns
+or is authorized to license them. Separately licensed third-party materials
+are excluded. These terms do not assert ownership of another person's work
+or supersede any license previously granted for a particular work or version.
+
+2. Permission to inspect
+
+You may view, read and study the Materials to understand or evaluate
+FolioLoom. You may download and retain unmodified copies solely for that
+inspection, provided you preserve this license and existing attribution,
+copyright and third-party notices. This permission does not include running
+the software, running its tests, modifying it, or incorporating its code or
+other protected expression into another project.
+
+3. Uses requiring separate written permission
+
+Except for Section 2, Section 4, separately licensed materials, or rights
+available under applicable law, you must obtain prior written permission
+from the relevant rights holder before executing, deploying, modifying,
+redistributing, sublicensing, selling, hosting or otherwise using the
+Materials, in whole or in part. This requirement applies to commercial and
+noncommercial use, including personal projects, internal business use and
+products or services that compete with FolioLoom.
+
+Public availability, access to the repository, a download or a fork does not
+by itself grant any additional permission. Silence is not permission.
+An express written authorization from the Licensor, including by email, or
+a separate signed agreement may grant additional rights on its stated terms.
+No patent or trademark license is granted by this document.
+
+4. GitHub and rights under applicable law
+
+Nothing in these terms restricts rights granted to GitHub or its users under
+the applicable GitHub Terms of Service, including viewing, displaying and
+forking this repository within GitHub and other uses expressly permitted
+through the Service. Those platform rights do not constitute an additional
+grant under this license to operate FolioLoom outside those rights.
+
+Nothing in these terms limits rights or exceptions that applicable law
+provides independently of this license, including any applicable fair use,
+quotation, interoperability or other mandatory exceptions. These terms do
+not prohibit independent development that does not use protected expression
+from the Materials.
+
+5. Third-party materials and contributions
+
+Dependencies and other third-party materials remain governed by their own
+licenses and notices. This license neither removes their permissions nor
+adds restrictions to them. Existing authorship and attribution must be
+preserved. See THIRD_PARTY.md for the dependency licensing overview.
+
+Making or accepting a contribution does not by itself transfer copyright
+ownership to the Licensor. Any additional rights needed to license a
+contribution must be obtained from its rights holder.
+
+6. Warranty and liability
+
+To the fullest extent permitted by applicable law, the Materials are
+provided "AS IS", without warranties of any kind, express or implied,
+including merchantability, fitness for a particular purpose and
+noninfringement. To the fullest extent permitted by applicable law, the
+Licensor is not liable for damages or other liability arising from access
+to or use of the Materials. Mandatory rights and liabilities are unaffected.
+
+7. Permission requests
+
+Contact: hello@folioloom.com
+Project: https://folioloom.com
+Repository: https://github.com/ogirkoviylord/folioloom_main
+
+Describe the intended use when requesting permission. Permissions may be
+granted free of charge or under a separately negotiated paid agreement.
+This is a proprietary source-inspection license, not an open-source license.

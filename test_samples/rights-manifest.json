@@ -5,6 +5,6 @@
     "generator": "scripts/generate_synthetic_glossary_control.py",
     "sha256": "395ac5bf5bd7742149cdae80a98e42117ccef6ccdbedf2f002ca5db2b459ae39",
     "third_party_book_content": false,
-    "license": "Subject to repository licensing decision; no separate open-source grant"
+    "license": "FolioLoom Source Inspection License 1.0; see ../LICENSE; no separate open-source grant"
   }
 ]

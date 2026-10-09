@@ -7,6 +7,24 @@ Telegram-бот остаётся удобным upload/test/delivery harness, н
 DeepSeek-compatible APIs - внутренний provider layer. Пользовательский бренд и
 UX остаются FolioLoom.
 
+## Source access and licensing
+
+FolioLoom is proprietary software made available for source inspection; it is
+not open source. You may read the code and download an unmodified copy to study
+or evaluate the project, preserving its notices. Running the application or
+its tests, modifying it, deploying it, redistributing it, or using its code in
+another project requires prior written permission, whether the use is
+commercial or noncommercial. GitHub platform rights and rights under applicable
+law are preserved.
+
+See [LICENSE](LICENSE) for the full terms and [THIRD_PARTY.md](THIRD_PARTY.md)
+for the dependency licensing overview. Third-party licenses remain in force.
+For permission, contact [hello@folioloom.com](mailto:hello@folioloom.com).
+Permission may be free or subject to a separate paid agreement.
+The setup, test and deployment instructions below are for the owner and
+people who have obtained the required authorization; they do not themselves
+grant permission to run the software.
+
 ## Current Status
 
 | Область | Статус |
